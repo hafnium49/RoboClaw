@@ -120,4 +120,4 @@ If you want to be an active contributor, please contact us by emailing bozhaonan
 
 ## 🙏 Acknowledgments
 
-RoboClaw references and inherits part of its initial thinking from earlier lightweight agent projects in the OpenClaw line. That work helped us build the first prototype faster and continue evolving toward embodied intelligence.
+RoboClaw references and inherits part of its initial thinking from [nanobot](https://github.com/HKUDS/nanobot). We appreciate its lightweight practice along the OpenClaw line, which helped us build the first prototype faster and continue evolving toward embodied intelligence.
