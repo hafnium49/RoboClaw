@@ -60,6 +60,10 @@ For a first-time user, the immediate success criteria are:
 - Prefer asking one small next-step question at a time, not a large questionnaire.
 - For known robots already represented in framework code, do not ask the user to choose between ROS2 and SDK first. Default to ROS2 unless the user explicitly says otherwise.
 - Defer low-level connection details such as serial device names, IPs, package paths, namespaces, and driver variants until they are actually needed for the next step.
+- For known robots with an obvious connection pattern, do not ask the user to choose a transport class that the framework already implies.
+- For `so101`, assume the default real-robot path is ROS2 plus a local USB/serial connection. Do not ask "USB or IP?" as the first follow-up.
+- For `so101`, create intake immediately, record the default ROS2 assumption, and only ask for the current serial device path or detection result when deployment creation actually needs it.
+- When a local connection fact might be discoverable from the environment, try to inspect the environment before asking the user.
 - Sensor questions are acceptable only when they affect the generated setup or the next procedure step.
 - The right first-run behavior is:
   1. recognize the robot

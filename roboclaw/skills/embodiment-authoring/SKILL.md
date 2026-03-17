@@ -49,6 +49,10 @@ are sufficient for RoboClaw to attempt:
 - The current path is framework contracts plus workspace assets loaded through catalog.
 - Do not require a first-time user to choose ROS2 vs SDK, list topics/actions, or provide package paths before intake starts when the framework already implies the default path.
 - Do not front-load large questionnaires. Ask one targeted question, then continue.
+- For known framework robots, prefer framework-default assumptions over open-ended transport questions.
+- For `SO101`, assume the default real setup is ROS2-backed and locally connected through USB/serial unless the user says otherwise.
+- For `SO101`, do not start by asking whether it is USB, serial, or IP. Start intake first, then only ask for the concrete serial device path if deployment generation needs it and you cannot infer it.
+- If a needed connection fact may be discoverable locally, inspect the environment before asking the user.
 
 ## Scaffolding
 
@@ -72,3 +76,7 @@ are sufficient for RoboClaw to attempt:
 - For a known framework robot such as SO101, start intake immediately and assume the framework-default path first.
 - Only ask questions the user is realistically expected to know.
 - Do not ask for connection details, namespaces, package names, or SDK choices until they are required for the next concrete action.
+- For `SO101`, a good next step is something like:
+  - "我已经先按 SO101 的默认 ROS2 接入方式为你创建了接入记录。下一步我来检查或记录当前串口设备，再继续生成部署配置。"
+  not:
+  - "你的 SO101 是通过什么方式连接到电脑的？"
