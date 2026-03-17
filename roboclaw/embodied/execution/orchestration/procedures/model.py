@@ -54,6 +54,46 @@ class InterventionTiming(StrEnum):
     ON_FAILURE = "on_failure"
 
 
+class CancellationMode(StrEnum):
+    """How a procedure/step can be cancelled."""
+
+    NON_CANCELLABLE = "non_cancellable"
+    SAFE_POINT = "safe_point"
+    IMMEDIATE = "immediate"
+
+
+class CompensationTrigger(StrEnum):
+    """When one compensation action should be applied."""
+
+    ON_FAILURE = "on_failure"
+    ON_CANCEL = "on_cancel"
+    ON_TIMEOUT = "on_timeout"
+
+
+class RollbackStrategy(StrEnum):
+    """How rollback should be applied for a procedure."""
+
+    NONE = "none"
+    REVERSE_COMPENSATION = "reverse_compensation"
+    DECLARED_ORDER = "declared_order"
+
+
+class IdempotencyMode(StrEnum):
+    """Idempotency strictness for repeated procedure requests."""
+
+    NONE = "none"
+    BEST_EFFORT = "best_effort"
+    STRICT = "strict"
+
+
+class IdempotencyConflictPolicy(StrEnum):
+    """How idempotency conflicts are resolved."""
+
+    REUSE_RESULT = "reuse_result"
+    REJECT_DUPLICATE = "reject_duplicate"
+    RESTART_EXECUTION = "restart_execution"
+
+
 @dataclass(frozen=True)
 class ProcedureRetryPolicy:
     """Retry policy for a step or a whole procedure."""
@@ -66,6 +106,71 @@ class ProcedureRetryPolicy:
             raise ValueError("Procedure retry max_retries cannot be negative.")
         if self.backoff_s < 0:
             raise ValueError("Procedure retry backoff_s cannot be negative.")
+
+
+@dataclass(frozen=True)
+class ProcedureCancellationPolicy:
+    """Cancellation behavior for one step or whole procedure."""
+
+    mode: CancellationMode = CancellationMode.SAFE_POINT
+    cancel_action: str | None = None
+    timeout_s: float = 10.0
+    requires_operator_confirmation: bool = False
+
+    def __post_init__(self) -> None:
+        if self.mode == CancellationMode.NON_CANCELLABLE and self.cancel_action is not None:
+            raise ValueError("Non-cancellable policy cannot define cancel_action.")
+        if self.cancel_action is not None and not self.cancel_action.strip():
+            raise ValueError("Cancellation policy cancel_action cannot be empty when specified.")
+        if self.timeout_s <= 0:
+            raise ValueError("Cancellation policy timeout_s must be > 0.")
+
+
+@dataclass(frozen=True)
+class ProcedureCompensationSpec:
+    """Compensation action executed during rollback."""
+
+    action: str
+    description: str
+    triggers: tuple[CompensationTrigger, ...] = (
+        CompensationTrigger.ON_FAILURE,
+        CompensationTrigger.ON_CANCEL,
+    )
+    timeout_s: float | None = None
+    best_effort: bool = True
+
+    def __post_init__(self) -> None:
+        if not self.action.strip():
+            raise ValueError("Compensation action cannot be empty.")
+        if not self.description.strip():
+            raise ValueError("Compensation description cannot be empty.")
+        if not self.triggers:
+            raise ValueError("Compensation must declare at least one trigger.")
+        if len(set(self.triggers)) != len(self.triggers):
+            raise ValueError("Compensation triggers cannot contain duplicates.")
+        if self.timeout_s is not None and self.timeout_s <= 0:
+            raise ValueError("Compensation timeout_s must be > 0 when specified.")
+
+
+@dataclass(frozen=True)
+class ProcedureIdempotencyPolicy:
+    """Idempotency behavior for repeated calls."""
+
+    mode: IdempotencyMode = IdempotencyMode.NONE
+    key_fields: tuple[str, ...] = field(default_factory=tuple)
+    conflict_policy: IdempotencyConflictPolicy = IdempotencyConflictPolicy.REUSE_RESULT
+    cache_window_s: float | None = None
+    persist_result: bool = True
+
+    def __post_init__(self) -> None:
+        if self.mode == IdempotencyMode.NONE and self.key_fields:
+            raise ValueError("Idempotency key_fields must be empty when mode is NONE.")
+        if self.mode != IdempotencyMode.NONE and not self.key_fields:
+            raise ValueError("Idempotency key_fields are required when mode is enabled.")
+        if any(not field_name.strip() for field_name in self.key_fields):
+            raise ValueError("Idempotency key_fields cannot contain empty values.")
+        if self.cache_window_s is not None and self.cache_window_s <= 0:
+            raise ValueError("Idempotency cache_window_s must be > 0 when specified.")
 
 
 @dataclass(frozen=True)
@@ -111,8 +216,17 @@ class ProcedureStep:
     preconditions: tuple[ProcedurePrecondition, ...] = field(default_factory=tuple)
     timeout_s: float | None = None
     retry_policy: ProcedureRetryPolicy = field(default_factory=ProcedureRetryPolicy)
+    cancellation: ProcedureCancellationPolicy | None = None
+    compensation: ProcedureCompensationSpec | None = None
+    idempotency: ProcedureIdempotencyPolicy | None = None
 
     def __post_init__(self) -> None:
+        if not self.id.strip():
+            raise ValueError("Procedure step id cannot be empty.")
+        if not self.action.strip():
+            raise ValueError(f"Step '{self.id}' action cannot be empty.")
+        if not self.description.strip():
+            raise ValueError(f"Step '{self.id}' description cannot be empty.")
         if self.timeout_s is not None and self.timeout_s <= 0:
             raise ValueError(f"Step '{self.id}' timeout_s must be > 0 when specified.")
 
@@ -132,6 +246,9 @@ class ProcedureDefinition:
     default_timeout_s: float | None = None
     default_retry_policy: ProcedureRetryPolicy = field(default_factory=ProcedureRetryPolicy)
     operator_interventions: tuple[OperatorInterventionPoint, ...] = field(default_factory=tuple)
+    cancellation_policy: ProcedureCancellationPolicy = field(default_factory=ProcedureCancellationPolicy)
+    rollback_strategy: RollbackStrategy = RollbackStrategy.REVERSE_COMPENSATION
+    idempotency_policy: ProcedureIdempotencyPolicy = field(default_factory=ProcedureIdempotencyPolicy)
 
     def __post_init__(self) -> None:
         if not self.steps:
@@ -197,3 +314,9 @@ class ProcedureDefinition:
                 raise ValueError(
                     f"Procedure '{self.id}' intervention '{point.id}' references unknown step '{point.step_id}'."
                 )
+
+        has_compensation = any(step.compensation is not None for step in self.steps)
+        if self.rollback_strategy != RollbackStrategy.NONE and not has_compensation:
+            raise ValueError(
+                f"Procedure '{self.id}' requires compensation steps when rollback is enabled."
+            )

@@ -3,11 +3,15 @@ from pathlib import Path
 
 from roboclaw.embodied import (
     ARM_HAND_BRIDGE,
+    CancellationMode,
+    CompensationTrigger,
     DEFAULT_PROCEDURES,
     DEFAULT_DOMAIN_BRIDGES,
     DRONE_BRIDGE,
     HUMANOID_WHOLE_BODY_BRIDGE,
+    IdempotencyMode,
     MOBILE_BASE_FLEET_BRIDGE,
+    RollbackStrategy,
     RGB_CAMERA,
     RawEvidenceHandle,
     SIMULATOR_BRIDGE,
@@ -287,7 +291,21 @@ def test_procedure_contract_is_machine_checkable() -> None:
     connect_step = next(step for step in connect.steps if step.id == "connect")
     assert connect_step.timeout_s == 30.0
     assert connect_step.retry_policy.max_retries == 2
+    assert connect.cancellation_policy.mode == CancellationMode.SAFE_POINT
+    assert connect.rollback_strategy == RollbackStrategy.REVERSE_COMPENSATION
+    assert connect.idempotency_policy.mode == IdempotencyMode.BEST_EFFORT
+    assert connect.idempotency_policy.key_fields == ("deployment_id", "target_id")
+    assert connect_step.cancellation is not None
+    assert connect_step.cancellation.mode == CancellationMode.IMMEDIATE
+    assert connect_step.compensation is not None
+    assert CompensationTrigger.ON_CANCEL in connect_step.compensation.triggers
+    assert connect_step.idempotency is not None
+    assert connect_step.idempotency.mode == IdempotencyMode.BEST_EFFORT
     assert connect.operator_interventions[0].step_id == "connect"
+
+    reset = next(procedure for procedure in DEFAULT_PROCEDURES if procedure.id == "reset_default")
+    assert reset.cancellation_policy.mode == CancellationMode.NON_CANCELLABLE
+    assert reset.idempotency_policy.mode == IdempotencyMode.STRICT
 
 
 def test_telemetry_contract_is_machine_checkable() -> None:

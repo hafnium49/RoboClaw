@@ -3,16 +3,24 @@
 from __future__ import annotations
 
 from roboclaw.embodied.execution.orchestration.procedures.model import (
+    CancellationMode,
+    CompensationTrigger,
+    IdempotencyConflictPolicy,
+    IdempotencyMode,
     InterventionTiming,
     OperatorInterventionPoint,
     PreconditionOperator,
     PreconditionSource,
+    ProcedureCancellationPolicy,
+    ProcedureCompensationSpec,
     ProcedureDefinition,
+    ProcedureIdempotencyPolicy,
     ProcedureKind,
     ProcedurePrecondition,
     ProcedureRetryPolicy,
     ProcedureStep,
     ProcedureStepEdge,
+    RollbackStrategy,
 )
 from roboclaw.embodied.definition.foundation.schema import CapabilityFamily
 
@@ -51,6 +59,27 @@ CONNECT_PROCEDURE = ProcedureDefinition(
             "Connect the adapter to the target.",
             timeout_s=30.0,
             retry_policy=ProcedureRetryPolicy(max_retries=2, backoff_s=1.0),
+            cancellation=ProcedureCancellationPolicy(
+                mode=CancellationMode.IMMEDIATE,
+                cancel_action="disconnect",
+                timeout_s=5.0,
+            ),
+            compensation=ProcedureCompensationSpec(
+                action="disconnect",
+                description="Disconnect transport if connection partially succeeded.",
+                triggers=(
+                    CompensationTrigger.ON_FAILURE,
+                    CompensationTrigger.ON_CANCEL,
+                    CompensationTrigger.ON_TIMEOUT,
+                ),
+                timeout_s=10.0,
+            ),
+            idempotency=ProcedureIdempotencyPolicy(
+                mode=IdempotencyMode.BEST_EFFORT,
+                key_fields=("deployment_id", "target_id"),
+                conflict_policy=IdempotencyConflictPolicy.REUSE_RESULT,
+                cache_window_s=30.0,
+            ),
         ),
         ProcedureStep(
             "verify_state",
@@ -67,6 +96,18 @@ CONNECT_PROCEDURE = ProcedureDefinition(
     ),
     default_timeout_s=20.0,
     default_retry_policy=ProcedureRetryPolicy(max_retries=1, backoff_s=1.0),
+    cancellation_policy=ProcedureCancellationPolicy(
+        mode=CancellationMode.SAFE_POINT,
+        cancel_action="disconnect",
+        timeout_s=10.0,
+    ),
+    rollback_strategy=RollbackStrategy.REVERSE_COMPENSATION,
+    idempotency_policy=ProcedureIdempotencyPolicy(
+        mode=IdempotencyMode.BEST_EFFORT,
+        key_fields=("deployment_id", "target_id"),
+        conflict_policy=IdempotencyConflictPolicy.REUSE_RESULT,
+        cache_window_s=60.0,
+    ),
     operator_interventions=(
         OperatorInterventionPoint(
             id="manual_network_check",
@@ -94,6 +135,21 @@ CALIBRATE_PROCEDURE = ProcedureDefinition(
             "start_calibration",
             "Start calibration for the selected targets.",
             timeout_s=30.0,
+            cancellation=ProcedureCancellationPolicy(
+                mode=CancellationMode.SAFE_POINT,
+                cancel_action="cancel_calibration",
+                timeout_s=10.0,
+            ),
+            compensation=ProcedureCompensationSpec(
+                action="cancel_calibration",
+                description="Cancel partially started calibration tasks.",
+                triggers=(
+                    CompensationTrigger.ON_FAILURE,
+                    CompensationTrigger.ON_CANCEL,
+                    CompensationTrigger.ON_TIMEOUT,
+                ),
+                timeout_s=30.0,
+            ),
         ),
         ProcedureStep(
             "track",
@@ -104,6 +160,18 @@ CALIBRATE_PROCEDURE = ProcedureDefinition(
         ),
     ),
     default_timeout_s=60.0,
+    cancellation_policy=ProcedureCancellationPolicy(
+        mode=CancellationMode.SAFE_POINT,
+        cancel_action="cancel_calibration",
+        timeout_s=15.0,
+    ),
+    rollback_strategy=RollbackStrategy.REVERSE_COMPENSATION,
+    idempotency_policy=ProcedureIdempotencyPolicy(
+        mode=IdempotencyMode.STRICT,
+        key_fields=("deployment_id", "target_ids"),
+        conflict_policy=IdempotencyConflictPolicy.REJECT_DUPLICATE,
+        cache_window_s=120.0,
+    ),
     operator_interventions=(
         OperatorInterventionPoint(
             id="pose_robot_for_calibration",
@@ -147,9 +215,43 @@ MOVE_PROCEDURE = ProcedureDefinition(
             "Execute the primitive through the adapter.",
             timeout_s=30.0,
             retry_policy=ProcedureRetryPolicy(max_retries=1, backoff_s=1.0),
+            cancellation=ProcedureCancellationPolicy(
+                mode=CancellationMode.IMMEDIATE,
+                cancel_action="stop",
+                timeout_s=3.0,
+            ),
+            compensation=ProcedureCompensationSpec(
+                action="stop",
+                description="Stop motion and hold position when execution aborts.",
+                triggers=(
+                    CompensationTrigger.ON_FAILURE,
+                    CompensationTrigger.ON_CANCEL,
+                    CompensationTrigger.ON_TIMEOUT,
+                ),
+                timeout_s=5.0,
+                best_effort=False,
+            ),
+            idempotency=ProcedureIdempotencyPolicy(
+                mode=IdempotencyMode.STRICT,
+                key_fields=("session_id", "primitive_name", "primitive_args_hash"),
+                conflict_policy=IdempotencyConflictPolicy.REJECT_DUPLICATE,
+                cache_window_s=15.0,
+            ),
         ),
     ),
     default_timeout_s=20.0,
+    cancellation_policy=ProcedureCancellationPolicy(
+        mode=CancellationMode.IMMEDIATE,
+        cancel_action="stop",
+        timeout_s=3.0,
+    ),
+    rollback_strategy=RollbackStrategy.REVERSE_COMPENSATION,
+    idempotency_policy=ProcedureIdempotencyPolicy(
+        mode=IdempotencyMode.STRICT,
+        key_fields=("session_id", "primitive_name", "primitive_args_hash"),
+        conflict_policy=IdempotencyConflictPolicy.REJECT_DUPLICATE,
+        cache_window_s=30.0,
+    ),
     operator_interventions=(
         OperatorInterventionPoint(
             id="confirm_high_risk_motion",
@@ -203,6 +305,18 @@ DEBUG_PROCEDURE = ProcedureDefinition(
         ),
     ),
     default_timeout_s=15.0,
+    cancellation_policy=ProcedureCancellationPolicy(
+        mode=CancellationMode.IMMEDIATE,
+        cancel_action="stop",
+        timeout_s=5.0,
+    ),
+    rollback_strategy=RollbackStrategy.NONE,
+    idempotency_policy=ProcedureIdempotencyPolicy(
+        mode=IdempotencyMode.BEST_EFFORT,
+        key_fields=("session_id", "debug_scope"),
+        conflict_policy=IdempotencyConflictPolicy.REUSE_RESULT,
+        cache_window_s=10.0,
+    ),
 )
 
 RESET_PROCEDURE = ProcedureDefinition(
@@ -241,9 +355,35 @@ RESET_PROCEDURE = ProcedureDefinition(
             "Reset to the default safe pose or mode.",
             timeout_s=20.0,
             retry_policy=ProcedureRetryPolicy(max_retries=1, backoff_s=1.0),
+            compensation=ProcedureCompensationSpec(
+                action="recover",
+                description="Run recovery if reset leaves system unstable.",
+                triggers=(
+                    CompensationTrigger.ON_FAILURE,
+                    CompensationTrigger.ON_TIMEOUT,
+                ),
+                timeout_s=15.0,
+            ),
+            idempotency=ProcedureIdempotencyPolicy(
+                mode=IdempotencyMode.STRICT,
+                key_fields=("session_id", "reset_mode"),
+                conflict_policy=IdempotencyConflictPolicy.REUSE_RESULT,
+                cache_window_s=20.0,
+            ),
         ),
     ),
     default_timeout_s=20.0,
+    cancellation_policy=ProcedureCancellationPolicy(
+        mode=CancellationMode.NON_CANCELLABLE,
+        timeout_s=5.0,
+    ),
+    rollback_strategy=RollbackStrategy.REVERSE_COMPENSATION,
+    idempotency_policy=ProcedureIdempotencyPolicy(
+        mode=IdempotencyMode.STRICT,
+        key_fields=("session_id", "reset_mode"),
+        conflict_policy=IdempotencyConflictPolicy.REUSE_RESULT,
+        cache_window_s=60.0,
+    ),
     operator_interventions=(
         OperatorInterventionPoint(
             id="clear_workspace",
