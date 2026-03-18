@@ -72,6 +72,19 @@ docker_profile_installs_ros2() {
   esac
 }
 
+docker_profile_stage1_python() {
+  local profile
+  profile="$(docker_profile "${1:-}")"
+  case "${profile}" in
+    *-ros2)
+      printf '%s\n' "/opt/roboclaw-ros2-venv/bin/python"
+      ;;
+    *)
+      printf '%s\n' "/usr/local/bin/python3"
+      ;;
+  esac
+}
+
 list_docker_profiles() {
   printf '%s\n' ubuntu2204 ubuntu2204-ros2 ubuntu2404 ubuntu2404-ros2
 }

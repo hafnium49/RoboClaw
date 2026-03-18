@@ -136,7 +136,8 @@ async def test_onboarding_generates_ready_setup_for_so101_with_camera(tmp_path: 
     assert "/wrist_camera/image_raw" in deployment_text
     assert "stage1_server" in deployment_text
     assert "--profile-id so101_ros2_standard" in deployment_text
-    assert "/usr/bin/python3 -m roboclaw.embodied.execution.integration.bridges.ros2.stage1_server" in deployment_text
+    assert "ROBOCLAW_ROS2_STAGE1_PYTHON" in deployment_text
+    assert 'source "/opt/ros/${ROBOCLAW_ROS2_DISTRO}/setup.bash"' in deployment_text
 
 
 @pytest.mark.asyncio

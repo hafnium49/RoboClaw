@@ -117,8 +117,15 @@ class Ros2EmbodimentProfile:
     ) -> str | None:
         if not self.stage1_bridge_module or not device.strip():
             return None
+        ros_setup = (
+            'if [ "${ROBOCLAW_ROS2_DISTRO:-none}" != "none" ] '
+            '&& [ -f "/opt/ros/${ROBOCLAW_ROS2_DISTRO}/setup.bash" ]; then '
+            'set +u; source "/opt/ros/${ROBOCLAW_ROS2_DISTRO}/setup.bash"; set -u; '
+            "fi &&"
+        )
         command = [
-            f"python3 -m {self.stage1_bridge_module}",
+            ros_setup,
+            f"${{ROBOCLAW_ROS2_STAGE1_PYTHON:-python3}} -m {self.stage1_bridge_module}",
             f"--namespace {shlex.quote(namespace)}",
             f"--profile-id {shlex.quote(self.id)}",
             f"--robot-id {shlex.quote(robot_id)}",
