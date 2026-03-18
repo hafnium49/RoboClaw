@@ -23,7 +23,10 @@ from roboclaw.agent.tools.shell import ExecTool
 from roboclaw.agent.tools.spawn import SpawnTool
 from roboclaw.agent.tools.web import WebFetchTool, WebSearchTool
 from roboclaw.bus.events import InboundMessage, OutboundMessage
+from roboclaw.embodied.execution.controller import EmbodiedExecutionController
+from roboclaw.embodied.execution.orchestration.runtime import RuntimeManager
 from roboclaw.bus.queue import MessageBus
+from roboclaw.embodied.onboarding import OnboardingController
 from roboclaw.providers.base import LLMProvider
 from roboclaw.session.manager import Session, SessionManager
 
@@ -86,6 +89,13 @@ class AgentLoop:
         self.context = ContextBuilder(workspace)
         self.sessions = session_manager or SessionManager(workspace)
         self.tools = ToolRegistry()
+        self.embodied_runtime = RuntimeManager()
+        self.onboarding = OnboardingController(workspace=workspace, tools=self.tools)
+        self.embodied_execution = EmbodiedExecutionController(
+            workspace=workspace,
+            tools=self.tools,
+            runtime_manager=self.embodied_runtime,
+        )
         self.subagents = SubagentManager(
             provider=provider,
             workspace=workspace,
@@ -416,14 +426,6 @@ class AgentLoop:
             if isinstance(message_tool, MessageTool):
                 message_tool.start_turn()
 
-        history = session.get_history(max_messages=self.memory_window)
-        initial_messages = self.context.build_messages(
-            history=history,
-            current_message=msg.content,
-            media=msg.media if msg.media else None,
-            channel=msg.channel, chat_id=msg.chat_id,
-        )
-
         async def _bus_progress(content: str, *, tool_hint: bool = False) -> None:
             meta = dict(msg.metadata or {})
             meta["_progress"] = True
@@ -431,6 +433,32 @@ class AgentLoop:
             await self.bus.publish_outbound(OutboundMessage(
                 channel=msg.channel, chat_id=msg.chat_id, content=content, metadata=meta,
             ))
+
+        if self.onboarding.should_handle(session, msg.content):
+            response = await self.onboarding.handle_message(
+                msg,
+                session,
+                on_progress=on_progress or _bus_progress,
+            )
+            self.sessions.save(session)
+            return response
+
+        if self.embodied_execution.should_handle(session, msg.content):
+            response = await self.embodied_execution.handle_message(
+                msg,
+                session,
+                on_progress=on_progress or _bus_progress,
+            )
+            self.sessions.save(session)
+            return response
+
+        history = session.get_history(max_messages=self.memory_window)
+        initial_messages = self.context.build_messages(
+            history=history,
+            current_message=msg.content,
+            media=msg.media if msg.media else None,
+            channel=msg.channel, chat_id=msg.chat_id,
+        )
 
         final_content, _, all_msgs = await self._run_agent_loop(
             initial_messages, on_progress=on_progress or _bus_progress,
