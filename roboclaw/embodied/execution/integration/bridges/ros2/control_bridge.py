@@ -264,7 +264,10 @@ def _parse_args() -> argparse.Namespace:
 
 
 def main() -> None:
+    import rclpy
+
     args = _parse_args()
+    rclpy.init()
     server = Ros2ControlBridgeServer(
         namespace=args.namespace,
         profile_id=args.profile_id,
