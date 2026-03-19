@@ -59,6 +59,13 @@ def _session_accepts_blank_input(session: object | None) -> bool:
     return str(raw.get("phase") or "").strip() in {"await_mid_pose_ack", "streaming"}
 
 
+def _print_progress_plain(content: str) -> None:
+    """Render progress updates as plain text so tmux/log capture stays clean."""
+    for idx, line in enumerate((content or "").splitlines() or [""]):
+        prefix = "  ↳ " if idx == 0 else "    "
+        console.print(f"{prefix}{line}", markup=False, highlight=False)
+
+
 def _flush_pending_tty_input() -> None:
     """Drop unread keypresses typed while the model was generating output."""
     try:
@@ -553,7 +560,7 @@ def agent(
             return
         if ch and not tool_hint and not ch.send_progress:
             return
-        console.print(f"  [dim]↳ {content}[/dim]")
+        _print_progress_plain(content)
 
     if message:
         # Single message mode — direct call, no bus needed
@@ -609,7 +616,7 @@ def agent(
                             elif ch and not is_tool_hint and not ch.send_progress:
                                 pass
                             else:
-                                console.print(f"  [dim]↳ {msg.content}[/dim]")
+                                _print_progress_plain(msg.content)
                         elif not turn_done.is_set():
                             if msg.content:
                                 turn_response.append(msg.content)

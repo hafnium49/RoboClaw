@@ -395,6 +395,34 @@ async def test_runtime_session_is_reused_across_multiple_commands(tmp_path: Path
 
 
 @pytest.mark.asyncio
+async def test_chinese_calibration_phrase_routes_to_calibration_without_provider(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _prepare_workspace(tmp_path)
+    _write_setup_assets(tmp_path, "so101_setup")
+    loop, provider, _ = _build_loop(tmp_path, _standard_ros2_responses("so101_setup"))
+    session = _seed_session(loop)
+
+    async def fake_execute_calibrate(context, on_progress=None):
+        assert context.setup_id == "so101_setup"
+        return ProcedureExecutionResult(
+            procedure=ProcedureKind.CALIBRATE,
+            ok=False,
+            message="calibration prompt",
+            details={"calibration_phase": "await_mid_pose_ack"},
+        )
+
+    monkeypatch.setattr(loop.embodied_execution.executor, "execute_calibrate", fake_execute_calibrate)
+
+    response = await loop.process_direct("我要标定", session_key=session.key)
+
+    assert provider.chat_calls == 0
+    assert response == "calibration prompt"
+    assert session.metadata["embodied_calibration"]["phase"] == "await_mid_pose_ack"
+
+
+@pytest.mark.asyncio
 async def test_setup_ambiguity_prompts_for_clarification(tmp_path: Path) -> None:
     _prepare_workspace(tmp_path)
     _write_setup_assets(tmp_path, "so101_setup")
@@ -612,7 +640,19 @@ async def test_calibrate_prompts_for_mid_pose_then_saves_on_second_enter(tmp_pat
             return {joint_name: raw - 2047 for joint_name, raw in mid_pose_raw.items()}
 
         def start_observation(self):
-            return self.snapshot_observed()
+            rows = (
+                SimpleNamespace(joint_name="shoulder_pan", servo_id=1, range_min_raw=512, position_raw=512, range_max_raw=512),
+                SimpleNamespace(joint_name="shoulder_lift", servo_id=2, range_min_raw=612, position_raw=612, range_max_raw=612),
+                SimpleNamespace(joint_name="elbow_flex", servo_id=3, range_min_raw=712, position_raw=712, range_max_raw=712),
+                SimpleNamespace(joint_name="wrist_flex", servo_id=4, range_min_raw=812, position_raw=812, range_max_raw=812),
+                SimpleNamespace(joint_name="wrist_roll", servo_id=5, range_min_raw=912, position_raw=912, range_max_raw=912),
+                SimpleNamespace(joint_name="gripper", servo_id=6, range_min_raw=2100, position_raw=2100, range_max_raw=2100),
+            )
+            return SimpleNamespace(
+                device_by_id="/dev/serial/by-id/usb-so101",
+                resolved_device="/dev/ttyACM0",
+                rows=rows,
+            )
 
         def snapshot_observed(self):
             self.snapshot_calls += 1
@@ -664,11 +704,36 @@ async def test_calibrate_prompts_for_mid_pose_then_saves_on_second_enter(tmp_pat
     assert calibration_path.exists()
     assert progress
     assert "SO101 calibration live view frame 1" in progress[0]
+    assert "gripper           6    2100   2100   2100" in progress[0]
     assert "shoulder_pan" in progress[0]
     assert fake_monitor.snapshot_calls >= 1
     payload = json.loads(calibration_path.read_text(encoding="utf-8"))
     assert payload["gripper"]["range_min"] == 1900
     assert executor.calibration_phase(context.runtime.id) is None
+
+
+@pytest.mark.asyncio
+async def test_calibrate_allows_overwriting_existing_file(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    executor, context, calibration_path = _execution_context(tmp_path, calibration_exists=True)
+
+    class FakeMonitor:
+        def connect(self) -> None:
+            return None
+
+        def prepare_manual_calibration(self) -> None:
+            return None
+
+        def disconnect(self) -> None:
+            return None
+
+    monkeypatch.setattr(executor, "_build_so101_calibration_monitor", lambda _: FakeMonitor())
+
+    prompt = await executor.execute_calibrate(context)
+
+    assert prompt.ok is False
+    assert "overwrite the existing calibration file" in prompt.message
+    assert str(calibration_path) in prompt.message
+    assert executor.calibration_phase(context.runtime.id) == "await_mid_pose_ack"
 
 
 @pytest.mark.asyncio

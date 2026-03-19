@@ -57,6 +57,8 @@ class So101CalibrationFlow:
     stop_event: asyncio.Event | None = None
     task: asyncio.Task[None] | None = None
     last_error: str | None = None
+    next_sample_idx: int = 1
+    overwrite_existing: bool = False
 
 
 class ProcedureExecutor:
@@ -258,17 +260,6 @@ class ProcedureExecutor:
         on_progress: Any | None = None,
     ) -> ProcedureExecutionResult:
         calibration_path = self._calibration_path(context)
-        if calibration_path is not None and calibration_path.exists():
-            return ProcedureExecutionResult(
-                procedure=ProcedureKind.CALIBRATE,
-                ok=True,
-                message=(
-                    f"Setup `{context.setup_id}` already has a calibration file at `{calibration_path}`. "
-                    "You can retry `connect` or your motion command."
-                ),
-                details={"calibration_path": str(calibration_path)},
-            )
-
         if getattr(context.profile, "robot_id", None) == "so101":
             return await self._prepare_so101_calibration(context)
 
@@ -369,7 +360,13 @@ class ProcedureExecutor:
             )
         existing = self._so101_calibration_flows.get(context.runtime.id)
         if existing is not None:
-            return self._so101_calibration_phase_message(context, phase=existing.phase, calibration_path=existing.calibration_path)
+            return self._so101_calibration_phase_message(
+                context,
+                phase=existing.phase,
+                calibration_path=existing.calibration_path,
+                overwrite_existing=existing.overwrite_existing,
+            )
+        overwrite_existing = calibration_path.exists()
         try:
             monitor = self._build_so101_calibration_monitor(context)
             monitor.connect()
@@ -382,6 +379,7 @@ class ProcedureExecutor:
                 interval_s=interval_s,
                 heartbeat_s=heartbeat_s,
                 sample_limit=sample_limit,
+                overwrite_existing=overwrite_existing,
             )
         except Exception as exc:
             context.runtime.status = RuntimeStatus.ERROR
@@ -400,6 +398,7 @@ class ProcedureExecutor:
             context,
             phase="await_mid_pose_ack",
             calibration_path=calibration_path,
+            overwrite_existing=overwrite_existing,
         )
 
     def _so101_calibration_stream_settings(self) -> tuple[float, float, int | None]:
@@ -415,16 +414,22 @@ class ProcedureExecutor:
         *,
         phase: str,
         calibration_path: Path,
+        overwrite_existing: bool = False,
     ) -> ProcedureExecutionResult:
         expected_path = str(calibration_path)
         if phase == "await_mid_pose_ack":
+            save_notice = (
+                f" RoboClaw will overwrite the existing calibration file at `{expected_path}` when you press Enter again."
+                if overwrite_existing
+                else f" RoboClaw will save the canonical calibration file to `{expected_path}` when you press Enter again."
+            )
             return ProcedureExecutionResult(
                 procedure=ProcedureKind.CALIBRATE,
                 ok=False,
                 message=(
                     f"SO101 calibration is ready for setup `{context.setup_id}`."
                     " Move the arm to a middle pose first, then press Enter to start live calibration."
-                    f" RoboClaw will save the canonical calibration file to `{expected_path}` when you press Enter again."
+                    + save_notice
                 ),
                 details={"calibration_path": expected_path, "calibration_phase": phase},
             )
@@ -456,9 +461,12 @@ class ProcedureExecutor:
         try:
             mid_pose = flow.monitor.capture_mid_pose()
             flow.monitor.apply_half_turn_homings(mid_pose)
-            flow.monitor.start_observation()
+            initial_snapshot = flow.monitor.start_observation()
             flow.stop_event = asyncio.Event()
             flow.phase = "streaming"
+            if on_progress is not None:
+                await on_progress(self._format_so101_calibration_snapshot(initial_snapshot, sample_idx=1))
+                flow.next_sample_idx = 2
             flow.task = asyncio.create_task(self._run_so101_calibration_stream(flow, on_progress=on_progress))
         except Exception as exc:
             self._cleanup_so101_calibration_flow(context.runtime.id)
@@ -529,7 +537,7 @@ class ProcedureExecutor:
         *,
         on_progress: Any | None,
     ) -> None:
-        sample_idx = 0
+        sample_idx = flow.next_sample_idx - 1
         last_payload = ""
         last_emit = 0.0
         try:

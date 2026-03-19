@@ -49,7 +49,11 @@ class EmbodiedExecutionController:
     """Handle embodied commands after onboarding hands off a ready setup."""
 
     _CONNECT_TOKENS = ("connect", "连接", "接入", "开始连接")
-    _CALIBRATE_TOKENS = ("calibrate", "校准")
+    _CALIBRATE_TOKENS = (
+        "calibrate",
+        "校准",
+        "标定",
+    )
     _DEBUG_TOKENS = ("debug", "诊断", "检查机器人", "检查状态")
     _RESET_TOKENS = ("reset", "复位", "回零", "恢复默认", "回到初始")
 
