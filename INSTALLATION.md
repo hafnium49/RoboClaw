@@ -35,7 +35,21 @@ Expected result:
 For SO101 embodied control, make sure calibration data is available under
 `~/.roboclaw/calibration/so101/`. The RoboClaw install now includes the Python
 `scservo_sdk` dependency bundle directly, so native users should get the same
-driver module that Docker uses.
+driver module that Docker uses. If you still have an older compatible
+calibration cache on the host, the first real SO101 control run will import it
+into `~/.roboclaw/calibration/so101/`.
+
+To seed the canonical native calibration path explicitly, run:
+
+```bash
+./scripts/prepare-native-calibration.sh --robot so101 --calibration-id so101_real
+```
+
+If you already have a calibration file to import, pass it directly:
+
+```bash
+./scripts/prepare-native-calibration.sh --robot so101 --calibration-id so101_real --source /path/to/so101_real.json
+```
 
 ## 3. Step 2: Initialize RoboClaw
 
@@ -212,7 +226,31 @@ The ideal outcome is:
 - the user only describes the goal
 - RoboClaw keeps the framework/workspace boundary intact
 
-## 8. Step 7: Verify That Embodied Assets Are Organized Correctly
+## 8. Native Acceptance Helpers
+
+For a bounded native SO101 acceptance run on the host, use:
+
+```bash
+./tests/test_native_so101_acceptance.sh
+```
+
+If the host does not already have a canonical RoboClaw calibration and you need
+to import a specific calibration file first, pass it as:
+
+```bash
+CALIBRATION_SOURCE=/path/to/so101_real.json ./tests/test_native_so101_acceptance.sh
+```
+
+That helper prepares canonical calibration under `~/.roboclaw/calibration/so101/`,
+checks `roboclaw agent -m "hello"`, and then runs the real-robot flow:
+
+- `I want to connect a real robot`
+- `SO101`
+- `connected`
+- `open the gripper`
+- `close the gripper`
+
+## 9. Step 7: Verify That Embodied Assets Are Organized Correctly
 
 You do not need every asset to be complete in one pass, but you should verify that the directory semantics are correct.
 

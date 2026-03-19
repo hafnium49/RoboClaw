@@ -35,8 +35,8 @@ That instance directory stores:
 
 The bootstrap step seeds instance-local calibration from the host's canonical
 `~/.roboclaw/calibration/` tree when it exists. If that tree is empty but a
-legacy lerobot calibration cache exists, the bootstrap step imports it once into
-the instance-local canonical layout.
+compatible legacy calibration cache exists, the bootstrap step imports it once
+into the instance-local canonical layout.
 
 ## When To Rebuild
 
@@ -49,6 +49,12 @@ Use `build-image.sh` only when the runtime environment changes:
 
 For normal Python source edits, keep the dev container running and rerun the command you are
 testing.
+
+To verify that a running dev container sees host source edits without a rebuild, use:
+
+```bash
+./tests/test_docker_dev_bind_mount.sh
+```
 
 ## Dependencies
 
