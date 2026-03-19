@@ -703,7 +703,7 @@ async def test_calibrate_prompts_for_mid_pose_then_saves_on_second_enter(tmp_pat
     assert str(calibration_path) in saved.message
     assert calibration_path.exists()
     assert progress
-    assert "SO101 calibration live view frame 1" in progress[0]
+    assert "SO101 calibration live view on" in progress[0]
     assert "gripper           6    2100   2100   2100" in progress[0]
     assert "shoulder_pan" in progress[0]
     assert fake_monitor.snapshot_calls >= 1

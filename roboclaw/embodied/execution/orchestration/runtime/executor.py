@@ -579,7 +579,7 @@ class ProcedureExecutor:
             return "?" if value is None else str(value)
 
         lines = [
-            f"SO101 calibration live view frame {sample_idx} on `{snapshot.resolved_device or snapshot.device_by_id}`",
+            f"SO101 calibration live view on `{snapshot.resolved_device or snapshot.device_by_id}`",
             "```text",
             "JOINT            ID     MIN    POS    MAX",
         ]

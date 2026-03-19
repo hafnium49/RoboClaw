@@ -48,6 +48,8 @@ EXIT_COMMANDS = {"exit", "quit", "/exit", "/quit", ":q"}
 
 _PROMPT_SESSION: PromptSession | None = None
 _SAVED_TERM_ATTRS = None  # original termios settings, restored on exit
+_LIVE_PROGRESS_LINES = 0
+_CALIBRATION_LIVE_PREFIX = "SO101 calibration live view on "
 
 
 def _session_accepts_blank_input(session: object | None) -> bool:
@@ -59,11 +61,54 @@ def _session_accepts_blank_input(session: object | None) -> bool:
     return str(raw.get("phase") or "").strip() in {"await_mid_pose_ack", "streaming"}
 
 
+def _session_calibration_phase(session: object | None) -> str | None:
+    if session is None or not hasattr(session, "metadata"):
+        return None
+    raw = getattr(session, "metadata", {}).get("embodied_calibration")
+    if not isinstance(raw, dict):
+        return None
+    phase = str(raw.get("phase") or "").strip()
+    return phase or None
+
+
+def _reset_live_progress() -> None:
+    global _LIVE_PROGRESS_LINES
+    _LIVE_PROGRESS_LINES = 0
+
+
+def _format_progress_lines(content: str) -> list[str]:
+    return [
+        ("  ↳ " if idx == 0 else "    ") + line
+        for idx, line in enumerate((content or "").splitlines() or [""])
+    ]
+
+
+def _is_calibration_live_progress(content: str) -> bool:
+    return bool(content) and content.startswith(_CALIBRATION_LIVE_PREFIX)
+
+
 def _print_progress_plain(content: str) -> None:
     """Render progress updates as plain text so tmux/log capture stays clean."""
-    for idx, line in enumerate((content or "").splitlines() or [""]):
-        prefix = "  ↳ " if idx == 0 else "    "
-        console.print(f"{prefix}{line}", markup=False, highlight=False)
+    global _LIVE_PROGRESS_LINES
+
+    lines = _format_progress_lines(content)
+    if _is_calibration_live_progress(content):
+        try:
+            fd = sys.stdout.fileno()
+        except Exception:
+            fd = None
+        if fd is not None and os.isatty(fd):
+            if _LIVE_PROGRESS_LINES > 0:
+                sys.stdout.write(f"\x1b[{_LIVE_PROGRESS_LINES}A")
+                sys.stdout.write("\x1b[J")
+            sys.stdout.write("\n".join(lines) + "\n")
+            sys.stdout.flush()
+            _LIVE_PROGRESS_LINES = len(lines)
+            return
+
+    _reset_live_progress()
+    for line in lines:
+        console.print(line, markup=False, highlight=False)
 
 
 def _flush_pending_tty_input() -> None:
@@ -129,6 +174,7 @@ def _init_prompt_session() -> None:
 
 def _print_agent_response(response: str, render_markdown: bool) -> None:
     """Render assistant response with consistent terminal styling."""
+    _reset_live_progress()
     content = response or ""
     body = Markdown(content) if render_markdown else Text(content)
     console.print()
@@ -159,6 +205,44 @@ async def _read_interactive_input_async() -> str:
             )
     except EOFError as exc:
         raise KeyboardInterrupt from exc
+
+
+def _wait_for_enter_blocking() -> None:
+    """Wait for Enter without showing a prompt, so live progress can own the screen."""
+    try:
+        fd = sys.stdin.fileno()
+        if not os.isatty(fd):
+            sys.stdin.readline()
+            return
+    except Exception:
+        sys.stdin.readline()
+        return
+
+    try:
+        import termios
+        import tty
+    except Exception:
+        sys.stdin.readline()
+        return
+
+    original = termios.tcgetattr(fd)
+    try:
+        tty.setcbreak(fd)
+        while True:
+            ready, _, _ = select.select([fd], [], [], 0.1)
+            if not ready:
+                continue
+            chunk = os.read(fd, 1)
+            if chunk in {b"\n", b"\r"}:
+                return
+            if chunk == b"\x03":
+                raise KeyboardInterrupt
+    finally:
+        termios.tcsetattr(fd, termios.TCSADRAIN, original)
+
+
+async def _wait_for_enter_async() -> None:
+    await asyncio.to_thread(_wait_for_enter_blocking)
 
 
 
@@ -631,6 +715,22 @@ def agent(
 
             outbound_task = asyncio.create_task(_consume_outbound())
 
+            async def _run_calibration_stream_mode() -> None:
+                while _session_calibration_phase(agent_loop.sessions.get_or_create(session_id)) == "streaming":
+                    console.print("[dim]Calibration live view is active. Press Enter to stop and save.[/dim]")
+                    await _wait_for_enter_async()
+                    turn_done.clear()
+                    turn_response.clear()
+                    await bus.publish_inbound(InboundMessage(
+                        channel=cli_channel,
+                        sender_id="user",
+                        chat_id=cli_chat_id,
+                        content="",
+                    ))
+                    await turn_done.wait()
+                    if turn_response:
+                        _print_agent_response(turn_response[0], render_markdown=markdown)
+
             try:
                 while True:
                     try:
@@ -661,6 +761,8 @@ def agent(
 
                         if turn_response:
                             _print_agent_response(turn_response[0], render_markdown=markdown)
+                        if _session_calibration_phase(agent_loop.sessions.get_or_create(session_id)) == "streaming":
+                            await _run_calibration_stream_mode()
                     except KeyboardInterrupt:
                         _restore_terminal()
                         console.print("\nGoodbye!")
