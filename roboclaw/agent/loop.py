@@ -225,6 +225,16 @@ class AgentLoop:
         state: Any,
         content: str,
     ) -> OnboardingIntent | None:
+        supported_robots: list[str] = []
+        for robot in self.onboarding.catalog.robots.list():
+            if robot.id not in supported_robots:
+                supported_robots.append(robot.id)
+        from roboclaw.embodied.execution.integration.adapters.ros2.profiles import DEFAULT_ROS2_PROFILES
+
+        for profile in DEFAULT_ROS2_PROFILES:
+            if profile.robot_id not in supported_robots:
+                supported_robots.append(profile.robot_id)
+
         prompt = (
             "You extract embodied onboarding intent as JSON.\n"
             "Return exactly one JSON object and nothing else.\n"
@@ -236,6 +246,10 @@ class AgentLoop:
             '"calibration_requested": boolean, "preferred_language": "en"|"zh"|null'
             "}.\n"
             "Do not infer facts that the user did not imply.\n"
+            f"Supported robot models (canonical IDs): {', '.join(supported_robots)}.\n"
+            "When the user mentions a robot, always normalize to the closest canonical ID from this list.\n"
+            "For example: 'SO-101', 'so_101', 'So101', 'SO 101' should all map to 'so101'.\n"
+            "If the user's robot does not match any supported model, return the user's text as-is in robot_ids.\n"
             "Examples:\n"
             '- "帮我标定" -> {"calibration_requested": true, "preferred_language": "zh"}\n'
             '- "已经接好了" -> {"connected": true, "preferred_language": "zh"}\n'

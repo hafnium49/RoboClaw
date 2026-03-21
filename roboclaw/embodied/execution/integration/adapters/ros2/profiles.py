@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import inspect
+import re
 import shlex
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -265,10 +266,14 @@ def get_ros2_profile(profile_or_robot_id: str | None) -> Ros2EmbodimentProfile |
 
     if profile_or_robot_id is None:
         return None
-    normalized = profile_or_robot_id.strip().lower()
+    normalized = re.sub(r"[\s\-_]+", "", profile_or_robot_id.strip().lower())
     if not normalized:
         return None
-    return _PROFILES_BY_ID.get(normalized) or _PROFILES_BY_ROBOT.get(normalized)
+    for candidates in (_PROFILES_BY_ID, _PROFILES_BY_ROBOT):
+        for key, profile in candidates.items():
+            if re.sub(r"[\s\-_]+", "", key.lower()) == normalized:
+                return profile
+    return None
 
 
 __all__ = [

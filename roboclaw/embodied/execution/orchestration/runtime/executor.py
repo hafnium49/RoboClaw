@@ -490,8 +490,8 @@ class ProcedureExecutor:
                 ok=False,
                 message=localize_text(
                     self._preferred_language(context),
-                    en=f"Setup `{context.setup_id}` does not declare a canonical calibration path.",
-                    zh=f"setup `{context.setup_id}` 没有声明标准标定文件路径。",
+                    en=f"Setup `{context.setup_id}` is not ready for calibration yet.",
+                    zh=f"setup `{context.setup_id}` 还没有准备好开始标定。",
                 ),
             )
         existing = self._so101_calibration_flows.get(context.runtime.id)
@@ -573,8 +573,8 @@ class ProcedureExecutor:
                 if overwrite_existing
                 else localize_text(
                     self._preferred_language(context),
-                    en=f" RoboClaw will save the canonical calibration file to `{expected_path}` when you press Enter again.",
-                    zh=f" 当你再次按 Enter 时，RoboClaw 会把标准标定文件保存到 `{expected_path}`。",
+                    en=f" RoboClaw will save the calibration file to `{expected_path}` when you press Enter again.",
+                    zh=f" 当你再次按 Enter 时，RoboClaw 会把标定文件保存到 `{expected_path}`。",
                 )
             )
             return ProcedureExecutionResult(
@@ -604,12 +604,12 @@ class ProcedureExecutor:
                     en=(
                         f"SO101 live calibration is already running for setup `{context.setup_id}`."
                         " Keep moving every joint through its full range of motion, then press Enter again to stop and save."
-                        f" Canonical path: `{expected_path}`."
+                        f" It will be saved to `{expected_path}`."
                     ),
                     zh=(
                         f"setup `{context.setup_id}` 的 SO101 实时标定已经在运行。"
                         " 继续把每个关节跑完整量程，然后再次按 Enter 停止并保存。"
-                        f" 标准路径：`{expected_path}`。"
+                        f" 标定文件会保存到 `{expected_path}`。"
                     ),
                 ),
                 details={"calibration_path": expected_path, "calibration_phase": phase},
@@ -669,13 +669,13 @@ class ProcedureExecutor:
                     f"SO101 live calibration started for setup `{context.setup_id}`."
                     " RoboClaw is now streaming a LeRobot-style `MIN | POS | MAX` table above."
                     " Move every joint through its full range of motion, then press Enter again to stop and save."
-                    f" Canonical path: `{flow.calibration_path}`."
+                    f" It will be saved to `{flow.calibration_path}`."
                 ),
                 zh=(
                     f"setup `{context.setup_id}` 的 SO101 实时标定已经开始。"
                     " RoboClaw 现在正在上方持续输出 LeRobot 风格的 `MIN | POS | MAX` 表格。"
                     " 请把每个关节都跑完整量程，然后再次按 Enter 停止并保存。"
-                    f" 标准路径：`{flow.calibration_path}`。"
+                    f" 标定文件会保存到 `{flow.calibration_path}`。"
                 ),
             ),
             details={"calibration_path": str(flow.calibration_path), "calibration_phase": "streaming"},
@@ -720,12 +720,13 @@ class ProcedureExecutor:
             message=localize_text(
                 self._preferred_language(context),
                 en=(
-                    f"Saved SO101 calibration for setup `{context.setup_id}` to `{flow.calibration_path}`."
-                    " You can retry `connect` or your motion command now."
+                    "Calibration complete! You can now control the arm — try saying "
+                    "'open gripper' or 'go to home position'."
+                    f" Calibration file saved to `{flow.calibration_path}`."
                 ),
                 zh=(
-                    f"已经把 setup `{context.setup_id}` 的 SO101 标定保存到 `{flow.calibration_path}`。"
-                    " 现在你可以重新尝试 `connect` 或运动指令了。"
+                    '标定完成！现在你可以控制机械臂了——试试说"打开夹爪"或"回到初始位置"。'
+                    f" 标定文件已保存到 `{flow.calibration_path}`。"
                 ),
             ),
             details={"calibration_path": str(flow.calibration_path), "calibration_phase": "completed"},

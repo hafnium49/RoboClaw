@@ -475,14 +475,14 @@ class OnboardingController:
                 "content": localize_text(
                     language,
                     en=(
-                        "I will build this setup as an assembly-first onboarding flow."
-                        "\nFirst tell me which robots and sensors belong in this setup."
-                        "\nFor example: `SO101`, `SO101 + wrist camera`, or `dual arms + overhead camera`."
+                        "Let's get your robot connected!"
+                        "\nFirst, tell me what robot you have."
+                        "\nFor example: `SO101`, or `SO101 with a wrist camera`."
                     ),
                     zh=(
-                        "我会按 assembly-first 的接入流程来建立这个本体配置。"
-                        "\n先告诉我这个 setup 里包含哪些机器人和传感器。"
-                        "\n例如：`SO101`、`SO101 + wrist camera`，或 `双臂 + overhead camera`。"
+                        "让我们来连接你的机器人！"
+                        "\n先告诉我你有什么机器人。"
+                        "\n例如：`SO101`，或 `SO101 加腕部摄像头`。"
                     ),
                 ),
             }
@@ -500,14 +500,15 @@ class OnboardingController:
                 "content": localize_text(
                     language,
                     en=(
-                        f"RoboClaw does not have a framework ROS2 control surface profile for `{primary_robot_id}` yet."
-                        "\nThis onboarding flow will not generate a standard ROS2 deployment/adapter until that profile exists."
-                        "\nSwitch to a supported robot profile or add an embodiment-owned control surface profile first."
+                        f"I don't recognize the robot model '{primary_robot_id}'."
+                        "\nCurrently supported: SO101."
+                        "\nPlease check the name and try again."
+                        "\nTechnical detail: RoboClaw does not have a framework ROS2 control surface profile for this model yet."
                     ),
                     zh=(
-                        f"RoboClaw 目前还没有 `{primary_robot_id}` 对应的框架级 ROS2 control surface profile。"
-                        "\n在这个 profile 存在之前，这条接入流程不会生成标准的 ROS2 deployment/adapter。"
-                        "\n请先切换到受支持的机器人 profile，或者补上该本体自己的 control surface profile。"
+                        f"我不认识机器人型号 '{primary_robot_id}'。"
+                        "\n目前支持的型号：SO101。"
+                        "\n请检查名称后再试一次。"
                     ),
                 ),
             }
@@ -524,13 +525,13 @@ class OnboardingController:
                 "content": localize_text(
                     language,
                     en=(
-                        f"I recorded the current setup scope in intake: {self._component_summary(state)}."
-                        "\nNext I only need one minimal fact: are these devices already connected to this machine?"
+                        f"I saved what you told me about this setup: {self._component_summary(state)}."
+                        "\nOne quick question: are these devices already connected to this machine?"
                         "\nYou can answer naturally, for example: `connected`, `not connected`, `已经接好了`, or `还没连接`."
                     ),
                     zh=(
-                        f"我已经把当前 setup 范围记到 intake 里了：{self._component_summary(state)}。"
-                        "\n下一步我只需要一个最小必要信息：这些设备现在是否已经接到这台机器上？"
+                        f"我已经记下你刚才告诉我的 setup 信息：{self._component_summary(state)}。"
+                        "\n还有一个简单问题：这些设备现在是否已经接到这台机器上？"
                         "\n你可以自然回答，例如：`connected`、`not connected`、`已经接好了`，或者 `还没连接`。"
                     ),
                 ),
@@ -550,22 +551,22 @@ class OnboardingController:
                 )
                 return {
                     "state": ready_state,
-                    "content": localize_text(
-                        language,
-                        en=(
-                            f"This setup is now ready: {self._component_summary(ready_state)}."
-                            "\nCalibration is available, and the setup assets have already been validated."
-                            "\nYou can continue with connect / calibrate / move / debug / reset."
-                            f"\nGenerated assets: {self._asset_summary(ready_state)}"
-                        ),
-                        zh=(
-                            f"这个 setup 现在已经就绪：{self._component_summary(ready_state)}。"
-                            "\n标定文件已经可用，而且 setup 资产也已经校验通过。"
-                            "\n你现在可以继续执行 connect / calibrate / move / debug / reset。"
-                            f"\n生成的资产：{self._asset_summary(ready_state)}"
-                        ),
+                "content": localize_text(
+                    language,
+                    en=(
+                        f"This setup is now ready: {self._component_summary(ready_state)}."
+                        "\nCalibration is done, and RoboClaw has already checked the setup files."
+                        "\nYou can now connect, calibrate, move, debug, or reset."
+                        f"\nCreated files: {self._asset_summary(ready_state)}"
                     ),
-                }
+                    zh=(
+                        f"这个 setup 现在已经就绪：{self._component_summary(ready_state)}。"
+                        "\n标定已经完成，RoboClaw 也已经检查过这些 setup 文件。"
+                        "\n现在你可以继续连接、标定、移动、排查问题或重置。"
+                        f"\n已生成的文件：{self._asset_summary(ready_state)}"
+                    ),
+                ),
+            }
 
             state, validation_content = await self._materialize_for_calibration(state, on_progress=on_progress)
             if validation_content is not None:
@@ -598,16 +599,18 @@ class OnboardingController:
                 "content": localize_text(
                     language,
                     en=(
-                        f"This `{primary_profile.robot_id}` profile requires framework-managed calibration before execution."
-                        f"\nExpected canonical path: `{expected_path}`."
-                        "\nNo calibration file is available in this container instance yet."
-                        "\nTell me to start calibration in natural language, for example: `calibrate` or `help me calibrate`."
+                        f"This `{primary_profile.robot_id}` robot needs calibration before you can use it."
+                        f"\nCalibration file location: `{expected_path}`."
+                        "\nThere is no calibration file available in this environment yet."
+                        "\nYou can start calibration in natural language, for example: `calibrate` or `help me calibrate`."
+                        "\nTechnical detail: this setup requires framework-managed calibration before execution."
                     ),
                     zh=(
-                        f"这个 `{primary_profile.robot_id}` profile 在执行前需要 RoboClaw 管理的标定。"
-                        f"\n标准标定文件路径应为：`{expected_path}`。"
-                        "\n当前这个容器实例里还没有可用的标定文件。"
-                        "\n直接自然地告诉我开始标定即可，例如：`calibrate`、`帮我标定` 或 `开始校准`。"
+                        f"这个 `{primary_profile.robot_id}` 机器人在使用前需要先完成标定。"
+                        f"\n标定文件位置：`{expected_path}`。"
+                        "\n当前这个环境里还没有可用的标定文件。"
+                        "\n直接告诉我开始标定即可，例如：`calibrate`、`帮我标定` 或 `开始校准`。"
+                        "\n技术说明：这个 setup 在执行前需要 RoboClaw 管理的标定。"
                     ),
                 ),
             }
