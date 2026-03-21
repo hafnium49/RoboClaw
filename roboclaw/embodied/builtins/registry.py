@@ -42,6 +42,7 @@ def _ensure_defaults_loaded() -> None:
     global _DEFAULTS_LOADED
     if _DEFAULTS_LOADED:
         return
+    from roboclaw.embodied.builtins import piperx  # noqa: F401
     from roboclaw.embodied.builtins import so101  # noqa: F401
 
     _DEFAULTS_LOADED = True
