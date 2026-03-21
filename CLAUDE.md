@@ -1,41 +1,45 @@
 # RoboClaw Agent 开发指南
 
-## 愿景
+---
 
-RoboClaw 是一个 Agent 驱动的具身智能框架。用户通过自然语言完成一切——从仿真体验到真机科研。
+## Part 1: 终极目标
 
-**架构（自底向上）：**
+用自然语言控制任何机器人。用户不碰代码、不看文档、不配环境。
 
-```
-本体层  真机 / 仿真器，通过 adapter 统一暴露
-控制层  primitive → skill → policy，三者统一为 agent tool
-科研层  数据采集 → 训练 → 推理 → 执行监督，内置 pipeline
-Agent层 唯一交互面，对话驱动一切
-```
+- **L0** — 没有机器人？打开就能在仿真里对话操控。
+- **L1** — 刚买了机械臂？几句话完成连接、校准、让它动起来。
+- **L2** — 想做复杂任务？对话组合出抓取、搬运等技能。
+- **L3** — 做科研？对话驱动数据采集、训练、部署、监督，完整闭环。
+- 接入新机器人不写代码，对话描述硬件，Agent 生成 adapter。
+- 内置 ACT、Diffusion Policy 等主流算法，对话选择和调参。
+- 仿真到真机无缝切换。每个本体自带安全约束，框架强制执行。
 
-**功能路线：**
+---
 
-| # | 功能 | 阶段 | 状态 |
-|---|------|------|------|
-| 1 | 对话式 onboarding（识别本体→探测→校准→就绪） | V1 | ✅ |
-| 2 | Primitive 执行（connect / calibrate / run_primitive / reset） | V1 | ✅ |
-| 3 | 多本体注册机制（builtins 声明 + 统一注册） | V1 | ✅ |
-| 4 | 仿真环境一键启动（没有真机也能对话体验） | V1 | ✅ |
-| 5 | Skill 组合（primitive 组合为 pick & place 等复合动作） | V1 | ✅ |
-| 6 | 实时状态反馈（执行时 Agent 能判断是否成功） | V1 | ✅ |
-| 7 | 数据采集（对话触发自动录制 episode） | V2 | ✅ |
-| 8 | 训练编排（对话启动训练、汇报进展） | V2 | ✅ |
-| 9 | 推理部署（对话加载模型、绑定本体） | V2 | ✅ |
-| 10 | 执行监督（自动判断 episode 成败、复位、继续） | V2 | ✅ |
+## Part 2: TODO
 
-**当前阶段：** V1——任何本体用户连接即可通过自然语言控制。
+> Claude B (loop) 按此列表工作。完成后标记 ✅，遇到阻塞标记 🚫。
 
-## 写代码
+### 当前批次
+
+- [ ] 1. 摄像头组合：本体 + 摄像头在 assembly 中绑定，实时取图，数据可录入 episode
+- [ ] 2. fork LeRobot dataset 模块到 `roboclaw/vendor/lerobot/`，将 data_collection 从 JSONL 切到 LeRobot dataset 格式（依赖 #1，episode 需带图像）
+- [ ] 3. fork LeRobot ACT policy，作为第一个内置训练 recipe（依赖 #2）
+- [x] 4. Layer 2 能力查询接口：从 primitive 的 CapabilityFamily 自动聚合本体能力，Agent 可查询 ✅
+- [ ] 5. 接入 PiperX 作为第二个 builtin 本体，参考 Evo-RL（GitHub），验证框架泛化（依赖 #4）
+- [ ] 6. L1 验收测试：Claude Code 扮演小白用户，自由对话连接 SO101 并让夹爪动起来（独立，可并行）
+
+
+---
+
+## Part 3: 工作规范
+
+### 写代码
 
 - 代码交给 Codex 写（`/codex-dispatch`）。Claude Code 负责读代码、设计方案、写 worker prompt、review 结果、跑验证、与用户沟通。
 - 每次结构性改动后，跑 `bash scripts/embodied_lines.sh` 并与上次对比。如果行数增长，必须给出理由或重构到不涨。向用户汇报 before/after。
 
-## 代码规范
+### 代码规范
 
 - 框架代码放 `roboclaw/embodied/`，用户资产放 `~/.roboclaw/workspace/embodied/`。
 - 不在通用层硬编码具体本体。本体特定逻辑只能在 `builtins/<id>.py`、manifest、profile、bridge 里。
@@ -43,16 +47,9 @@ Agent层 唯一交互面，对话驱动一切
 - 最小化代码量。不引入新抽象，除非它消除的代码比引入的更多。
 - RoboClaw 对用户的对话必须保持高层次和通用化。不暴露串口路径、底层协议细节、内部技术实现。用户应无感地完成操作。
 
-## 验证
+### 验证
 
 - 本地：`python -m pytest tests/ -x -q`
 - 远程 Docker：按 memory 中存储的流程执行（`reference_remote_validation.md`）
-- **每个大版本功能完成后，必须在远程真机上以小白用户身份与 RoboClaw 对话，验证完整流程能否走通。测试通过不算验收，对话走通才算。**
-
-## Review 检查项
-
-- 重复逻辑
-- 框架/setup 边界泄漏
-- 通用层中的本体硬编码
-- 架构偏移
-- 用户对话中是否暴露了底层细节
+- **验收测试：** Claude Code 扮演小白用户，带着目标自由对话 RoboClaw，根据 RoboClaw 反馈模拟小白的想法，一步一步交互。最终能完成目标即通过。
+- 测试通过不算验收，对话走通才算。
