@@ -83,12 +83,13 @@ COPY roboclaw/ roboclaw/
 COPY bridge/ bridge/
 RUN python -m pip install --no-cache-dir --break-system-packages --ignore-installed .
 RUN if [ "${ROBOCLAW_INSTALL_ROS2}" = "1" ]; then \
-      curl -fsSL https://bootstrap.pypa.io/get-pip.py | /usr/bin/python3 - --break-system-packages && \
-      /usr/bin/python3 -m pip install --no-cache-dir --break-system-packages --ignore-requires-python --ignore-installed .; \
+      /usr/bin/python3 -m pip install --no-cache-dir --break-system-packages --ignore-requires-python --ignore-installed . \
+        || (curl -fsSL https://bootstrap.pypa.io/get-pip.py | /usr/bin/python3 - --break-system-packages --force-reinstall && \
+            /usr/bin/python3 -m pip install --no-cache-dir --break-system-packages --ignore-requires-python --ignore-installed .); \
     fi
-RUN python -c "import importlib.util; print('scservo_sdk:', 'found' if importlib.util.find_spec('scservo_sdk') else 'not installed (install externally for SO101 hardware)')"
+RUN python -c "import roboclaw; import scservo_sdk; print('scservo_sdk: found (vendored)')"
 RUN if [ "${ROBOCLAW_INSTALL_ROS2}" = "1" ]; then \
-      /usr/bin/python3 -c "import importlib.util; modules=('roboclaw','pydantic','pydantic_core'); missing=[m for m in modules if importlib.util.find_spec(m) is None]; assert not missing, f'missing control-python modules: {missing}'"; \
+      /usr/bin/python3 -c "import roboclaw; import scservo_sdk; import pydantic; import pydantic_core; print('control-python modules: ok')"; \
     fi
 
 RUN mv /usr/local/bin/roboclaw /usr/local/bin/roboclaw-real

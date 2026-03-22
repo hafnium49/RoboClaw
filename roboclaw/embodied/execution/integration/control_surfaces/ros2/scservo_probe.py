@@ -23,7 +23,6 @@ def main(argv: list[str] | None = None) -> int:
         sdk_available = "scservo_sdk" in sys.modules
     if not sdk_available:
         print("ROBOCLAW_SO101_SERIAL_SDK_MISSING")
-        print("Install the external SO101 SDK first. See docs/embodiments/so101.md")
         return 0
 
     result = probe_servo_register(

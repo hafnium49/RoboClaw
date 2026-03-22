@@ -15,6 +15,8 @@
 - 内置 ACT、Diffusion Policy 等主流算法，对话选择和调参。
 - 仿真到真机无缝切换。每个本体自带安全约束，框架强制执行。
 
+> 完整产品版图见 `docs/product-vision.md`，竞品分析见 `docs/competitive-analysis.md`。
+
 ---
 
 ## Part 2: TODO
@@ -54,3 +56,5 @@
 - 本地：`python -m pytest tests/ -x -q`
 - 远程 Docker：按 memory 中存储的流程执行（`reference_remote_validation.md`）
 - **每次代码改动后，必须按 `docs/acceptance-test.md` 执行验收测试。** Claude Code 扮演小白用户，自由对话 RoboClaw，通过摄像头验证夹爪开合。测试通过不算验收，对话走通才算。
+
+> 验收测试案例详见 `docs/acceptance-test.md`（A1 夹爪开合 / A4 仿真体验 / A6 采集 episode / A7 训练 ACT）。

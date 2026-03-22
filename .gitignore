@@ -6,8 +6,6 @@ dist/
 build/
 docs/*
 !docs/docker-workflow.md
-!docs/embodiments/
-!docs/embodiments/so101.md
 *.egg-info/
 *.egg
 *.pyc
@@ -23,3 +21,4 @@ __pycache__/
 poetry.lock
 .pytest_cache/
 botpy.log
+CLAUDE.md

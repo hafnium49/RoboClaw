@@ -139,7 +139,7 @@ def test_so101_runtime_missing_sdk_points_to_docs(monkeypatch: pytest.MonkeyPatc
     monkeypatch.delitem(sys.modules, "scservo_sdk", raising=False)
     monkeypatch.setattr("importlib.util.find_spec", lambda name: None if name == "scservo_sdk" else object())
 
-    with pytest.raises(ModuleNotFoundError, match="docs/embodiments/so101.md"):
+    with pytest.raises(ModuleNotFoundError, match="scservo_sdk is unavailable"):
         So101FeetechRuntime._ensure_scservo_sdk()
 
 

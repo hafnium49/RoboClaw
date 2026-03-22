@@ -311,7 +311,7 @@ class So101FeetechRuntime:
             if "scservo_sdk" in sys.modules:
                 return
         raise ModuleNotFoundError(
-            "scservo_sdk is unavailable. Install the external SO101 SDK first. See docs/embodiments/so101.md"
+            "scservo_sdk is unavailable. Install the RoboClaw SO101 Python dependency bundle before launching the ROS2 control-surface server."
         )
 
 
