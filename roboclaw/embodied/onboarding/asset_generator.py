@@ -213,7 +213,8 @@ class AssetGenerator:
             sensor_blocks = ""
         target_imports = (
             "from roboclaw.embodied.execution.integration.carriers.model import ExecutionTarget\n"
-            "from roboclaw.embodied.definition.foundation.schema import CarrierKind, SimulatorKind, TransportKind"
+            "from roboclaw.embodied.definition.foundation.schema import CarrierKind, SimulatorKind, TransportKind\n"
+            "from roboclaw.embodied.execution.integration.transports.ros2 import build_standard_ros2_contract"
             if is_sim
             else
             "from roboclaw.embodied.execution.integration.carriers.real import build_real_ros2_target\n"
@@ -223,9 +224,10 @@ class AssetGenerator:
             f"SIM_TARGET = ExecutionTarget(\n"
             "    id='sim',\n"
             "    carrier=CarrierKind.SIM,\n"
-            "    transport=TransportKind.DIRECT,\n"
+            "    transport=TransportKind.ROS2,\n"
             f"    description={'Simulation target for ' + state.setup_id!r},\n"
             "    simulator=SimulatorKind.MUJOCO,\n"
+            f"    ros2=build_standard_ros2_contract({state.assembly_id!r}, 'sim'),\n"
             ")\n"
             if is_sim
             else
