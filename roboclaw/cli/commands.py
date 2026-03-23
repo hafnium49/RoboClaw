@@ -817,11 +817,11 @@ def agent(
                             _print_agent_response(turn_response[0], render_markdown=markdown)
                     except KeyboardInterrupt:
                         _restore_terminal()
-                        console.print("\nGoodbye!")
+                        _print_session_exit_message(resolved_session_id)
                         break
                     except EOFError:
                         _restore_terminal()
-                        console.print("\nGoodbye!")
+                        _print_session_exit_message(resolved_session_id)
                         break
             finally:
                 agent_loop.stop()
