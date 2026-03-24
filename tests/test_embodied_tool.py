@@ -10,6 +10,7 @@ from unittest.mock import patch as std_patch
 
 from roboclaw.embodied.setup import (
     _CALIBRATION_ROOT,
+    arm_display_name,
     load_setup,
     remove_arm,
     remove_camera,
@@ -53,12 +54,14 @@ _MOCK_SETUP = {
             "port": "/dev/ttyACM0",
             "calibration_dir": "/cal/f",
             "calibrated": False,
+            "alias": "右臂",
         },
         "leader": {
             "type": "so101_leader",
             "port": "/dev/ttyACM1",
             "calibration_dir": "/cal/l",
             "calibrated": False,
+            "alias": "左臂",
         },
     },
     "cameras": {
@@ -102,8 +105,8 @@ async def test_calibrate_all_arms() -> None:
         result = await tool.execute(action="calibrate")
 
     assert "2 succeeded" in result
-    assert "follower" in result
-    assert "leader" in result
+    assert "右臂 (follower)" in result
+    assert "左臂 (leader)" in result
     assert mock_runner.run_interactive.call_count == 2
     assert mock_handoff.call_count == 4  # start+stop for each arm
 
@@ -297,3 +300,28 @@ def test_validation_rejects_bad_arm_type(setup_file: Path) -> None:
     bad["arms"]["follower"] = {"type": "garbage", "port": "/dev/x"}
     with pytest.raises(ValueError, match="invalid type"):
         save_setup(bad, setup_file)
+
+
+# ── alias tests ──────────────────────────────────────────────────────
+
+
+def test_set_arm_with_alias(setup_file: Path) -> None:
+    with std_patch("roboclaw.embodied.scan.scan_serial_ports", return_value=_MOCK_SCANNED_PORTS):
+        result = set_arm("follower", "so101_follower", "/dev/ttyACM0", alias="右臂", path=setup_file)
+    arm = result["arms"]["follower"]
+    assert arm["alias"] == "右臂"
+    persisted = load_setup(setup_file)
+    assert persisted["arms"]["follower"]["alias"] == "右臂"
+
+
+def test_set_arm_without_alias(setup_file: Path) -> None:
+    with std_patch("roboclaw.embodied.scan.scan_serial_ports", return_value=_MOCK_SCANNED_PORTS):
+        result = set_arm("follower", "so101_follower", "/dev/ttyACM0", path=setup_file)
+    assert "alias" not in result["arms"]["follower"]
+
+
+def test_arm_display_name() -> None:
+    assert arm_display_name("follower", {"alias": "右臂"}) == "右臂 (follower)"
+    assert arm_display_name("leader", {}) == "leader"
+    assert arm_display_name("follower", {"alias": ""}) == "follower"
+    assert arm_display_name("follower", {"alias": None}) == "follower"

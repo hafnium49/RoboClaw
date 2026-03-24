@@ -11,7 +11,7 @@ SETUP_PATH = Path("~/.roboclaw/workspace/embodied/setup.json").expanduser()
 
 _ARM_TYPES = ("so101_follower", "so101_leader")
 _ARM_ROLES = ("follower", "leader")
-_ARM_FIELDS = {"type", "port", "calibration_dir", "calibrated"}
+_ARM_FIELDS = {"type", "port", "calibration_dir", "calibrated", "alias"}
 _CAMERA_FIELDS = {"by_path", "by_id", "dev", "width", "height"}
 _VALID_TOP_KEYS = {"version", "arms", "cameras", "datasets", "policies", "scanned_ports", "scanned_cameras"}
 
@@ -99,7 +99,9 @@ def _resolve_port(port: str, scanned_ports: list[dict]) -> str:
 # ── Structured mutators (exposed as agent actions) ──────────────────
 
 
-def set_arm(role: str, arm_type: str, port: str, path: Path = SETUP_PATH) -> dict[str, Any]:
+def set_arm(
+    role: str, arm_type: str, port: str, *, alias: str | None = None, path: Path = SETUP_PATH,
+) -> dict[str, Any]:
     """Add or update an arm. Auto-fills calibration_dir, sets calibrated=False."""
     if role not in _ARM_ROLES:
         raise ValueError(f"Invalid role '{role}'. Must be one of {_ARM_ROLES}.")
@@ -110,14 +112,25 @@ def set_arm(role: str, arm_type: str, port: str, path: Path = SETUP_PATH) -> dic
     from roboclaw.embodied.scan import scan_serial_ports
     setup = load_setup(path)
     port = _resolve_port(port, scan_serial_ports())
-    setup.setdefault("arms", {})[role] = {
+    entry: dict[str, Any] = {
         "type": arm_type,
         "port": port,
         "calibration_dir": str(_CALIBRATION_ROOT / role),
         "calibrated": False,
     }
+    if alias:
+        entry["alias"] = alias
+    setup.setdefault("arms", {})[role] = entry
     save_setup(setup, path)
     return setup
+
+
+def arm_display_name(role: str, arm: dict) -> str:
+    """Return user-friendly display name: 'alias (role)' if alias exists, else role."""
+    alias = arm.get("alias")
+    if alias:
+        return f"{alias} ({role})"
+    return role
 
 
 def remove_arm(role: str, path: Path = SETUP_PATH) -> dict[str, Any]:

@@ -46,7 +46,8 @@ class EmbodiedTool(Tool):
             "Control embodied robots — connect, calibrate, collect data, "
             "train policies, and run inference. "
             "Use setup_show to view current config. "
-            "Use set_arm/remove_arm to configure arms (role: follower/leader). "
+            "Use set_arm/remove_arm to configure arms (role: follower/leader, "
+            "optional alias for friendly display name). "
             "Use set_camera/remove_camera to configure cameras "
             "(picks from scanned_cameras by index)."
         )
@@ -115,6 +116,10 @@ class EmbodiedTool(Tool):
                     "type": "integer",
                     "description": "Index into scanned_cameras (for set_camera).",
                 },
+                "alias": {
+                    "type": "string",
+                    "description": "Friendly display name for the arm (for set_arm).",
+                },
             },
             "required": ["action"],
         }
@@ -163,13 +168,18 @@ class EmbodiedTool(Tool):
 
     @staticmethod
     def _do_set_arm(kwargs: dict, fn: Any) -> str:
+        from roboclaw.embodied.setup import arm_display_name
+
         role = kwargs.get("role", "")
         arm_type = kwargs.get("arm_type", "")
         port = kwargs.get("port", "")
         if not all([role, arm_type, port]):
             return "set_arm requires role, arm_type, and port."
-        updated = fn(role, arm_type, port)
-        return f"Arm '{role}' configured.\n{json.dumps(updated['arms'][role], indent=2)}"
+        alias = kwargs.get("alias") or None
+        updated = fn(role, arm_type, port, alias=alias)
+        arm = updated["arms"][role]
+        display = arm_display_name(role, arm)
+        return f"Arm '{display}' configured.\n{json.dumps(arm, indent=2)}"
 
     @staticmethod
     def _do_remove_arm(kwargs: dict, fn: Any) -> str:
@@ -206,7 +216,7 @@ class EmbodiedTool(Tool):
     async def _do_calibrate(self, setup: dict) -> str:
         from roboclaw.embodied.embodiment.so101 import SO101Controller
         from roboclaw.embodied.runner import LocalLeRobotRunner
-        from roboclaw.embodied.setup import update_setup
+        from roboclaw.embodied.setup import arm_display_name, update_setup
 
         arms = setup.get("arms", {})
         if not arms:
@@ -221,42 +231,50 @@ class EmbodiedTool(Tool):
         succeeded, failed = 0, 0
         results = []
         for name, arm in uncalibrated.items():
+            display = arm_display_name(name, arm)
             argv = controller.calibrate(arm["type"], arm["port"], arm.get("calibration_dir", ""))
-            returncode = await self._run_tty(runner, argv, f"lerobot-calibrate ({name})")
+            returncode = await self._run_tty(runner, argv, f"lerobot-calibrate ({display})")
             if returncode == 0:
                 succeeded += 1
                 update_setup({"arms": {name: {"calibrated": True}}})
-                results.append(f"{name}: OK")
+                results.append(f"{display}: OK")
             else:
                 failed += 1
-                results.append(f"{name}: FAILED (exit {returncode})")
+                results.append(f"{display}: FAILED (exit {returncode})")
         return f"{succeeded} succeeded, {failed} failed.\n" + "\n".join(results)
 
     async def _do_teleoperate(self, setup: dict) -> str:
         from roboclaw.embodied.embodiment.so101 import SO101Controller
         from roboclaw.embodied.runner import LocalLeRobotRunner
+        from roboclaw.embodied.setup import arm_display_name
 
         follower, leader = self._resolve_arms(setup)
         if isinstance(follower, str):
             return follower
         if not self._tty_handoff:
             return _NO_TTY_MSG
+        arms = setup.get("arms", {})
+        f_name = arm_display_name("follower", arms.get("follower", {}))
+        l_name = arm_display_name("leader", arms.get("leader", {}))
         argv = SO101Controller().teleoperate(
             robot_type=follower["type"], robot_port=follower["port"], robot_cal_dir=follower["calibration_dir"],
             teleop_type=leader["type"], teleop_port=leader["port"], teleop_cal_dir=leader["calibration_dir"],
         )
-        rc = await self._run_tty(LocalLeRobotRunner(), argv, "lerobot-teleoperate")
+        rc = await self._run_tty(LocalLeRobotRunner(), argv, f"lerobot-teleoperate ({f_name} + {l_name})")
         return "Teleoperation finished." if rc == 0 else f"Teleoperation failed (exit {rc})."
 
     async def _do_record(self, setup: dict, kwargs: dict) -> str:
         from roboclaw.embodied.embodiment.so101 import SO101Controller
         from roboclaw.embodied.runner import LocalLeRobotRunner
+        from roboclaw.embodied.setup import arm_display_name
 
         follower, leader = self._resolve_arms(setup)
         if isinstance(follower, str):
             return follower
         if not self._tty_handoff:
             return _NO_TTY_MSG
+        arms = setup.get("arms", {})
+        f_name = arm_display_name("follower", arms.get("follower", {}))
         cameras = self._resolve_cameras(setup)
         dataset_name = kwargs.get("dataset_name", "default")
         argv = SO101Controller().record(
@@ -268,7 +286,7 @@ class EmbodiedTool(Tool):
             fps=kwargs.get("fps", 30),
             num_episodes=kwargs.get("num_episodes", 10),
         )
-        rc = await self._run_tty(LocalLeRobotRunner(), argv, "lerobot-record")
+        rc = await self._run_tty(LocalLeRobotRunner(), argv, f"lerobot-record ({f_name})")
         return "Recording finished." if rc == 0 else f"Recording failed (exit {rc})."
 
     async def _do_train(self, setup: dict, kwargs: dict) -> str:
