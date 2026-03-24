@@ -18,12 +18,15 @@ _ACTIONS = [
     "setup_update",
 ]
 
-_POLICY_OUTPUT = Path("~/.roboclaw/workspace/embodied/policies").expanduser()
 _LOGS_DIR = Path("~/.roboclaw/workspace/embodied/jobs").expanduser()
 
 
 class EmbodiedTool(Tool):
-    """Control embodied robots via the agent."""
+    """Control embodied robots via the agent.
+
+    The agent maintains setup.json through conversation (setup_show / setup_update).
+    All hardware actions read setup.json for arm ports, cameras, calibration dirs.
+    """
 
     @property
     def name(self) -> str:
@@ -34,7 +37,9 @@ class EmbodiedTool(Tool):
         return (
             "Control embodied robots — connect, calibrate, collect data, "
             "train policies, and run inference. "
-            "Use setup_show to view current robot config, setup_update to change it."
+            "Use setup_show to view current config, setup_update to change it. "
+            "The setup has 'arms' (keyed by role like follower/leader) and "
+            "'cameras' (keyed by position like front/side)."
         )
 
     @property
@@ -47,13 +52,9 @@ class EmbodiedTool(Tool):
                     "enum": _ACTIONS,
                     "description": "The action to perform.",
                 },
-                "port": {
+                "arm_role": {
                     "type": "string",
-                    "description": "Serial port (prefer /dev/serial/by-id/... for stability).",
-                },
-                "calibration_dir": {
-                    "type": "string",
-                    "description": "Directory for calibration data.",
+                    "description": "Which arm to calibrate (e.g. 'follower', 'leader').",
                 },
                 "dataset_name": {
                     "type": "string",
@@ -89,23 +90,19 @@ class EmbodiedTool(Tool):
                 },
                 "updates": {
                     "type": "object",
-                    "description": "Fields to update in setup.json (for setup_update).",
+                    "description": "Fields to merge into setup.json (for setup_update).",
                 },
             },
             "required": ["action"],
         }
 
     async def execute(self, **kwargs: Any) -> str:
-        from roboclaw.embodied.embodiment.so101 import SO101Controller
-        from roboclaw.embodied.learning.act import ACTPipeline
-        from roboclaw.embodied.runner import LocalLeRobotRunner
         from roboclaw.embodied.setup import ensure_setup, load_setup, update_setup
 
         action = kwargs.get("action", "")
 
         if action == "setup_show":
-            setup = load_setup()
-            return json.dumps(setup, indent=2, ensure_ascii=False)
+            return json.dumps(load_setup(), indent=2, ensure_ascii=False)
 
         if action == "setup_update":
             updates = kwargs.get("updates", {})
@@ -115,68 +112,145 @@ class EmbodiedTool(Tool):
             return f"Setup updated:\n{json.dumps(updated, indent=2, ensure_ascii=False)}"
 
         setup = ensure_setup()
-        runner = LocalLeRobotRunner()
-        port = kwargs.get("port") or setup.get("robot", {}).get("port", "")
-        calibration_dir = kwargs.get("calibration_dir") or setup.get("calibration", {}).get("dir", "")
-        dataset_root = setup.get("datasets", {}).get("root", "")
 
         if action == "doctor":
-            controller = SO101Controller()
-            result = await self._run(runner, controller.doctor())
-            setup_info = f"\n\nCurrent setup:\n{json.dumps(setup, indent=2, ensure_ascii=False)}"
-            return result + setup_info
-
+            return await self._do_doctor(setup)
         if action == "calibrate":
-            controller = SO101Controller()
-            return await self._run(runner, controller.calibrate(robot_port=port, calibration_dir=calibration_dir))
-
+            return await self._do_calibrate(setup, kwargs)
         if action == "teleoperate":
-            controller = SO101Controller()
-            return await self._run(runner, controller.teleoperate(robot_port=port, calibration_dir=calibration_dir))
-
+            return await self._do_teleoperate(setup)
         if action == "record":
-            controller = SO101Controller()
-            argv = controller.record(
-                robot_port=port,
-                calibration_dir=calibration_dir,
-                dataset_name=kwargs.get("dataset_name", "default"),
-                task=kwargs.get("task", "default_task"),
-                num_episodes=kwargs.get("num_episodes", 10),
-                fps=kwargs.get("fps", 30),
-            )
-            return await self._run(runner, argv)
-
+            return await self._do_record(setup, kwargs)
         if action == "train":
-            pipeline = ACTPipeline()
-            dataset_name = kwargs.get("dataset_name", "default")
-            dataset_path = str(Path(dataset_root) / dataset_name)
-            argv = pipeline.train(
-                dataset_path=dataset_path,
-                output_dir=str(_POLICY_OUTPUT),
-                steps=kwargs.get("steps", 100_000),
-                device=kwargs.get("device", "cuda"),
-            )
-            job_id = await runner.run_detached(argv=argv, log_dir=_LOGS_DIR)
-            return f"Training started. Job ID: {job_id}"
-
+            return await self._do_train(setup, kwargs)
         if action == "run_policy":
-            controller = SO101Controller()
-            pipeline = ACTPipeline()
-            checkpoint = kwargs.get("checkpoint_path") or pipeline.checkpoint_path(str(_POLICY_OUTPUT))
-            argv = controller.run_policy(
-                robot_port=port,
-                calibration_dir=calibration_dir,
-                checkpoint_path=checkpoint,
-                num_episodes=kwargs.get("num_episodes", 1),
-            )
-            return await self._run(runner, argv)
-
+            return await self._do_run_policy(setup, kwargs)
         if action == "job_status":
-            job_id = kwargs.get("job_id", "")
-            status = await runner.job_status(job_id=job_id, log_dir=_LOGS_DIR)
-            return "\n".join(f"{k}: {v}" for k, v in status.items())
+            return await self._do_job_status(kwargs)
 
         return f"Unknown action: {action}"
+
+    async def _do_doctor(self, setup: dict) -> str:
+        from roboclaw.embodied.embodiment.so101 import SO101Controller
+        from roboclaw.embodied.runner import LocalLeRobotRunner
+
+        result = await self._run(LocalLeRobotRunner(), SO101Controller().doctor())
+        return result + f"\n\nCurrent setup:\n{json.dumps(setup, indent=2, ensure_ascii=False)}"
+
+    async def _do_calibrate(self, setup: dict, kwargs: dict) -> str:
+        from roboclaw.embodied.embodiment.so101 import SO101Controller
+        from roboclaw.embodied.runner import LocalLeRobotRunner
+
+        arm_role = kwargs.get("arm_role", "")
+        arm = setup.get("arms", {}).get(arm_role)
+        if not arm:
+            available = list(setup.get("arms", {}).keys())
+            return f"Arm '{arm_role}' not found in setup. Available: {available}"
+        argv = SO101Controller().calibrate(
+            arm_type=arm["type"],
+            arm_port=arm["port"],
+            calibration_dir=arm.get("calibration_dir", ""),
+        )
+        return await self._run(LocalLeRobotRunner(), argv)
+
+    async def _do_teleoperate(self, setup: dict) -> str:
+        from roboclaw.embodied.embodiment.so101 import SO101Controller
+        from roboclaw.embodied.runner import LocalLeRobotRunner
+
+        follower, leader = self._resolve_arms(setup)
+        if isinstance(follower, str):
+            return follower
+        argv = SO101Controller().teleoperate(
+            robot_type=follower["type"], robot_port=follower["port"], robot_cal_dir=follower["calibration_dir"],
+            teleop_type=leader["type"], teleop_port=leader["port"], teleop_cal_dir=leader["calibration_dir"],
+        )
+        return await self._run(LocalLeRobotRunner(), argv)
+
+    async def _do_record(self, setup: dict, kwargs: dict) -> str:
+        from roboclaw.embodied.embodiment.so101 import SO101Controller
+        from roboclaw.embodied.runner import LocalLeRobotRunner
+
+        follower, leader = self._resolve_arms(setup)
+        if isinstance(follower, str):
+            return follower
+        cameras = self._resolve_cameras(setup)
+        dataset_name = kwargs.get("dataset_name", "default")
+        argv = SO101Controller().record(
+            robot_type=follower["type"], robot_port=follower["port"], robot_cal_dir=follower["calibration_dir"],
+            teleop_type=leader["type"], teleop_port=leader["port"], teleop_cal_dir=leader["calibration_dir"],
+            cameras=cameras,
+            repo_id=f"local/{dataset_name}",
+            task=kwargs.get("task", "default_task"),
+            fps=kwargs.get("fps", 30),
+            num_episodes=kwargs.get("num_episodes", 10),
+        )
+        return await self._run(LocalLeRobotRunner(), argv)
+
+    async def _do_train(self, setup: dict, kwargs: dict) -> str:
+        from roboclaw.embodied.learning.act import ACTPipeline
+        from roboclaw.embodied.runner import LocalLeRobotRunner
+
+        dataset_name = kwargs.get("dataset_name", "default")
+        dataset_root = setup.get("datasets", {}).get("root", "")
+        policies_root = setup.get("policies", {}).get("root", "")
+        argv = ACTPipeline().train(
+            repo_id=f"local/{dataset_name}",
+            dataset_root=dataset_root,
+            output_dir=policies_root,
+            steps=kwargs.get("steps", 100_000),
+            device=kwargs.get("device", "cuda"),
+        )
+        job_id = await LocalLeRobotRunner().run_detached(argv=argv, log_dir=_LOGS_DIR)
+        return f"Training started. Job ID: {job_id}"
+
+    async def _do_run_policy(self, setup: dict, kwargs: dict) -> str:
+        from roboclaw.embodied.embodiment.so101 import SO101Controller
+        from roboclaw.embodied.learning.act import ACTPipeline
+        from roboclaw.embodied.runner import LocalLeRobotRunner
+
+        follower = setup.get("arms", {}).get("follower")
+        if not follower:
+            return "No follower arm configured. Use setup_update to add one."
+        cameras = self._resolve_cameras(setup)
+        policies_root = setup.get("policies", {}).get("root", "")
+        checkpoint = kwargs.get("checkpoint_path") or ACTPipeline().checkpoint_path(policies_root)
+        argv = SO101Controller().run_policy(
+            robot_type=follower["type"], robot_port=follower["port"], robot_cal_dir=follower["calibration_dir"],
+            cameras=cameras, policy_path=checkpoint,
+            num_episodes=kwargs.get("num_episodes", 1),
+        )
+        return await self._run(LocalLeRobotRunner(), argv)
+
+    async def _do_job_status(self, kwargs: dict) -> str:
+        from roboclaw.embodied.runner import LocalLeRobotRunner
+
+        job_id = kwargs.get("job_id", "")
+        status = await LocalLeRobotRunner().job_status(job_id=job_id, log_dir=_LOGS_DIR)
+        return "\n".join(f"{k}: {v}" for k, v in status.items())
+
+    def _resolve_arms(self, setup: dict) -> tuple[dict, dict] | tuple[str, None]:
+        """Get follower and leader arm configs from setup. Returns error string if missing."""
+        arms = setup.get("arms", {})
+        follower = arms.get("follower")
+        leader = arms.get("leader")
+        if not follower:
+            return "No follower arm configured. Use setup_update to add arms.", None
+        if not leader:
+            return "No leader arm configured. Use setup_update to add arms.", None
+        return follower, leader
+
+    def _resolve_cameras(self, setup: dict) -> dict[str, dict]:
+        """Convert setup cameras to LeRobot camera format {name: {type, index}}."""
+        import re
+        cameras = setup.get("cameras", {})
+        result = {}
+        for name, cam in cameras.items():
+            dev = cam.get("dev", "")
+            m = re.match(r"/dev/video(\d+)$", dev)
+            if not m:
+                continue
+            result[name] = {"type": "opencv", "index": int(m.group(1))}
+        return result
 
     @staticmethod
     async def _run(runner: Any, argv: list[str]) -> str:
@@ -184,5 +258,3 @@ class EmbodiedTool(Tool):
         if returncode != 0:
             return f"Command failed (exit {returncode}).\nstdout: {stdout}\nstderr: {stderr}"
         return stdout or "Done."
-
-

@@ -10,20 +10,17 @@ from typing import Any
 SETUP_PATH = Path("~/.roboclaw/workspace/embodied/setup.json").expanduser()
 
 _DEFAULT_SETUP: dict[str, Any] = {
-    "version": 1,
-    "robot": {
-        "type": "",
-        "port": "",
-    },
-    "cameras": [],
-    "calibration": {
-        "status": "missing",
-        "dir": str(Path("~/.roboclaw/workspace/embodied/calibration").expanduser()),
-    },
+    "version": 2,
+    "arms": {},
+    "cameras": {},
     "datasets": {
         "root": str(Path("~/.roboclaw/workspace/embodied/datasets").expanduser()),
     },
+    "policies": {
+        "root": str(Path("~/.roboclaw/workspace/embodied/policies").expanduser()),
+    },
     "scanned_ports": [],
+    "scanned_cameras": [],
 }
 
 
@@ -45,11 +42,8 @@ def create_setup_with_scan(path: Path = SETUP_PATH) -> dict[str, Any]:
     from roboclaw.embodied.scan import scan_cameras, scan_serial_ports
 
     setup = copy.deepcopy(_DEFAULT_SETUP)
-    ports = scan_serial_ports()
-    setup["scanned_ports"] = ports
-    if len(ports) == 1:
-        setup["robot"]["port"] = ports[0]["by_id"] or ports[0]["by_path"] or ports[0]["dev"]
-    setup["cameras"] = scan_cameras()
+    setup["scanned_ports"] = scan_serial_ports()
+    setup["scanned_cameras"] = scan_cameras()
     save_setup(setup, path)
     return setup
 

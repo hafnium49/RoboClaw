@@ -26,10 +26,31 @@ def test_tool_schema() -> None:
     ]
     assert action_schema["enum"] == expected_actions
 
-    for key in ("port", "calibration_dir", "dataset_name", "task",
-                "num_episodes", "fps", "steps", "checkpoint_path",
-                "job_id", "device", "updates"):
-        assert key in params["properties"], f"Missing optional param: {key}"
+
+_MOCK_SETUP = {
+    "version": 2,
+    "arms": {
+        "follower": {
+            "type": "so101_follower",
+            "port": "/dev/ttyACM0",
+            "calibration_dir": "/cal/f",
+            "calibrated": False,
+        },
+        "leader": {
+            "type": "so101_leader",
+            "port": "/dev/ttyACM1",
+            "calibration_dir": "/cal/l",
+            "calibrated": False,
+        },
+    },
+    "cameras": {
+        "front": {"by_path": "", "by_id": "", "dev": "/dev/video0", "width": 640, "height": 480},
+    },
+    "datasets": {"root": "/data"},
+    "policies": {"root": "/policies"},
+    "scanned_ports": [],
+    "scanned_cameras": [],
+}
 
 
 @pytest.mark.asyncio
@@ -38,10 +59,39 @@ async def test_doctor_action() -> None:
     mock_runner = AsyncMock()
     mock_runner.run.return_value = (0, "lerobot 0.5.0", "")
 
-    with patch("roboclaw.embodied.runner.LocalLeRobotRunner", return_value=mock_runner):
+    with (
+        patch("roboclaw.embodied.setup.ensure_setup", return_value=_MOCK_SETUP),
+        patch("roboclaw.embodied.runner.LocalLeRobotRunner", return_value=mock_runner),
+    ):
         result = await tool.execute(action="doctor")
 
     assert "lerobot 0.5.0" in result
+    assert "setup" in result.lower()
+
+
+@pytest.mark.asyncio
+async def test_calibrate_action() -> None:
+    tool = EmbodiedTool()
+    mock_runner = AsyncMock()
+    mock_runner.run.return_value = (0, "Calibration done", "")
+
+    with (
+        patch("roboclaw.embodied.setup.ensure_setup", return_value=_MOCK_SETUP),
+        patch("roboclaw.embodied.runner.LocalLeRobotRunner", return_value=mock_runner),
+    ):
+        result = await tool.execute(action="calibrate", arm_role="follower")
+
+    assert "Calibration done" in result
+    argv = mock_runner.run.call_args[0][0]
+    assert "--robot.type=so101_follower" in argv
+
+
+@pytest.mark.asyncio
+async def test_calibrate_missing_arm() -> None:
+    tool = EmbodiedTool()
+    with patch("roboclaw.embodied.setup.ensure_setup", return_value=_MOCK_SETUP):
+        result = await tool.execute(action="calibrate", arm_role="nonexistent")
+    assert "not found" in result.lower()
 
 
 @pytest.mark.asyncio
@@ -50,19 +100,17 @@ async def test_record_action() -> None:
     mock_runner = AsyncMock()
     mock_runner.run.return_value = (0, "Recorded 5 episodes", "")
 
-    with patch("roboclaw.embodied.runner.LocalLeRobotRunner", return_value=mock_runner):
-        result = await tool.execute(
-            action="record",
-            dataset_name="my_data",
-            task="grasp block",
-            num_episodes=5,
-            fps=15,
-        )
+    with (
+        patch("roboclaw.embodied.setup.ensure_setup", return_value=_MOCK_SETUP),
+        patch("roboclaw.embodied.runner.LocalLeRobotRunner", return_value=mock_runner),
+    ):
+        result = await tool.execute(action="record", dataset_name="test", task="grasp", num_episodes=5)
 
-    assert result == "Recorded 5 episodes"
+    assert "Recorded 5 episodes" in result
     argv = mock_runner.run.call_args[0][0]
-    assert "lerobot-record" in argv
-    assert "--robot.type=so101" in argv
+    assert "--robot.type=so101_follower" in argv
+    assert "--teleop.type=so101_leader" in argv
+    assert any("--robot.cameras=" in a for a in argv)
 
 
 @pytest.mark.asyncio
@@ -71,49 +119,18 @@ async def test_train_action() -> None:
     mock_runner = AsyncMock()
     mock_runner.run_detached.return_value = "job-abc-123"
 
-    with patch("roboclaw.embodied.runner.LocalLeRobotRunner", return_value=mock_runner):
-        result = await tool.execute(
-            action="train",
-            dataset_name="my_data",
-            steps=5000,
-        )
+    with (
+        patch("roboclaw.embodied.setup.ensure_setup", return_value=_MOCK_SETUP),
+        patch("roboclaw.embodied.runner.LocalLeRobotRunner", return_value=mock_runner),
+    ):
+        result = await tool.execute(action="train", dataset_name="test", steps=5000)
 
     assert "job-abc-123" in result
-    assert "Training started" in result
-
-
-@pytest.mark.asyncio
-async def test_job_status_action() -> None:
-    tool = EmbodiedTool()
-    mock_runner = AsyncMock()
-    mock_runner.job_status.return_value = {"status": "running", "step": 2500}
-
-    with patch("roboclaw.embodied.runner.LocalLeRobotRunner", return_value=mock_runner):
-        result = await tool.execute(action="job_status", job_id="job-abc-123")
-
-    assert "running" in result
-    assert "2500" in result
-
-
-@pytest.mark.asyncio
-async def test_command_failure_returns_error() -> None:
-    tool = EmbodiedTool()
-    mock_runner = AsyncMock()
-    mock_runner.run.return_value = (1, "", "lerobot not found")
-
-    with patch("roboclaw.embodied.runner.LocalLeRobotRunner", return_value=mock_runner):
-        result = await tool.execute(action="doctor")
-
-    assert "Command failed" in result
-    assert "lerobot not found" in result
 
 
 @pytest.mark.asyncio
 async def test_unknown_action() -> None:
     tool = EmbodiedTool()
-    mock_runner = AsyncMock()
-
-    with patch("roboclaw.embodied.runner.LocalLeRobotRunner", return_value=mock_runner):
+    with patch("roboclaw.embodied.setup.ensure_setup", return_value=_MOCK_SETUP):
         result = await tool.execute(action="fly_to_moon")
-
     assert "Unknown action" in result

@@ -1,4 +1,4 @@
-"""ACT policy command builder."""
+"""ACT policy command builder for LeRobot 0.5.0."""
 
 from __future__ import annotations
 
@@ -10,21 +10,21 @@ class ACTPipeline:
 
     def train(
         self,
-        dataset_path: str,
+        repo_id: str,
+        dataset_root: str,
         output_dir: str,
         steps: int = 100000,
         device: str = "cuda",
     ) -> list[str]:
-        """Build the ACT training command."""
-        dataset_dir = Path(dataset_path).expanduser()
+        """Build the ACT training command (LeRobot 0.5.0 format)."""
         return [
             "lerobot-train",
-            f"--dataset.repo_id=local/{dataset_dir.name}",
-            f"--dataset.root={dataset_dir.parent}",
+            f"--dataset.repo_id={repo_id}",
+            f"--dataset.root={Path(dataset_root).expanduser()}",
             "--policy.type=act",
             f"--output_dir={Path(output_dir).expanduser()}",
-            f"--training.num_steps={steps}",
-            f"--device={device}",
+            f"--steps={steps}",
+            f"--policy.device={device}",
         ]
 
     def checkpoint_path(self, output_dir: str) -> str:
