@@ -6,6 +6,8 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
+from unittest.mock import patch as std_patch
+
 from roboclaw.embodied.setup import (
     _CALIBRATION_ROOT,
     load_setup,
@@ -16,6 +18,11 @@ from roboclaw.embodied.setup import (
     set_camera,
 )
 from roboclaw.embodied.tool import EmbodiedTool
+
+_MOCK_SCANNED_PORTS = [
+    {"by_path": "/dev/serial/by-path/pci-0:2.1", "by_id": "/dev/serial/by-id/usb-1a86_5B14032630", "dev": "/dev/ttyACM0"},
+    {"by_path": "/dev/serial/by-path/pci-0:2.2", "by_id": "/dev/serial/by-id/usb-1a86_5B14030892", "dev": "/dev/ttyACM1"},
+]
 
 
 def test_tool_schema() -> None:
@@ -187,10 +194,10 @@ def setup_file(tmp_path: Path) -> Path:
 
 
 def test_set_arm(setup_file: Path) -> None:
-    result = set_arm("follower", "so101_follower", "/dev/ttyACM0", path=setup_file)
+    with std_patch("roboclaw.embodied.scan.scan_serial_ports", return_value=_MOCK_SCANNED_PORTS):
+        result = set_arm("follower", "so101_follower", "/dev/ttyACM0", path=setup_file)
     arm = result["arms"]["follower"]
     assert arm["type"] == "so101_follower"
-    # Port should be resolved to by_id from scanned_ports
     assert arm["port"] == "/dev/serial/by-id/usb-1a86_5B14032630"
     assert arm["calibration_dir"] == str(_CALIBRATION_ROOT / "follower")
     assert arm["calibrated"] is False
@@ -201,20 +208,30 @@ def test_set_arm(setup_file: Path) -> None:
 
 def test_set_arm_resolves_volatile_port(setup_file: Path) -> None:
     """Volatile /dev/ttyACMx should be resolved to stable /dev/serial/by-id/..."""
-    result = set_arm("leader", "so101_leader", "/dev/ttyACM1", path=setup_file)
+    with std_patch("roboclaw.embodied.scan.scan_serial_ports", return_value=_MOCK_SCANNED_PORTS):
+        result = set_arm("leader", "so101_leader", "/dev/ttyACM1", path=setup_file)
     assert result["arms"]["leader"]["port"] == "/dev/serial/by-id/usb-1a86_5B14030892"
 
 
 def test_set_arm_keeps_stable_port(setup_file: Path) -> None:
     """Already-stable by-id port should be kept as-is."""
     stable = "/dev/serial/by-id/usb-custom-device"
-    result = set_arm("follower", "so101_follower", stable, path=setup_file)
+    with std_patch("roboclaw.embodied.scan.scan_serial_ports", return_value=[]):
+        result = set_arm("follower", "so101_follower", stable, path=setup_file)
     assert result["arms"]["follower"]["port"] == stable
 
 
+def test_set_arm_unmatched_volatile_port(setup_file: Path) -> None:
+    """Volatile port not in scan results should be kept as-is."""
+    with std_patch("roboclaw.embodied.scan.scan_serial_ports", return_value=[]):
+        result = set_arm("follower", "so101_follower", "/dev/ttyUSB99", path=setup_file)
+    assert result["arms"]["follower"]["port"] == "/dev/ttyUSB99"
+
+
 def test_set_arm_invalid_type(setup_file: Path) -> None:
-    with pytest.raises(ValueError, match="Invalid arm_type"):
-        set_arm("follower", "bogus_arm", "/dev/ttyACM0", path=setup_file)
+    with std_patch("roboclaw.embodied.scan.scan_serial_ports", return_value=[]):
+        with pytest.raises(ValueError, match="Invalid arm_type"):
+            set_arm("follower", "bogus_arm", "/dev/ttyACM0", path=setup_file)
 
 
 def test_set_arm_invalid_role(setup_file: Path) -> None:
@@ -223,7 +240,8 @@ def test_set_arm_invalid_role(setup_file: Path) -> None:
 
 
 def test_remove_arm(setup_file: Path) -> None:
-    set_arm("follower", "so101_follower", "/dev/ttyACM0", path=setup_file)
+    with std_patch("roboclaw.embodied.scan.scan_serial_ports", return_value=[]):
+        set_arm("follower", "so101_follower", "/dev/ttyACM0", path=setup_file)
     result = remove_arm("follower", path=setup_file)
     assert "follower" not in result["arms"]
 

@@ -89,7 +89,10 @@ def _resolve_port(port: str, scanned_ports: list[dict]) -> str:
     for entry in scanned_ports:
         if entry.get("dev") != port:
             continue
-        return entry.get("by_id") or entry.get("by_path") or port
+        by_id = entry.get("by_id", "")
+        if by_id:
+            return by_id
+        return port
     return port
 
 
@@ -104,8 +107,9 @@ def set_arm(role: str, arm_type: str, port: str, path: Path = SETUP_PATH) -> dic
         raise ValueError(f"Invalid arm_type '{arm_type}'. Must be one of {_ARM_TYPES}.")
     if not port:
         raise ValueError("Arm port is required.")
+    from roboclaw.embodied.scan import scan_serial_ports
     setup = load_setup(path)
-    port = _resolve_port(port, setup.get("scanned_ports", []))
+    port = _resolve_port(port, scan_serial_ports())
     setup.setdefault("arms", {})[role] = {
         "type": arm_type,
         "port": port,
