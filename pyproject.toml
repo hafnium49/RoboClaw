@@ -50,7 +50,7 @@ dependencies = [
 
 [project.optional-dependencies]
 research = [
-    "lerobot>=0.5.0",
+    "lerobot[feetech]>=0.5.0",
 ]
 wecom = [
     "wecom-aibot-sdk-python>=0.1.5",
