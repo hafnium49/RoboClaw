@@ -12,13 +12,13 @@ SETUP_PATH = Path("~/.roboclaw/workspace/embodied/setup.json").expanduser()
 _DEFAULT_SETUP: dict[str, Any] = {
     "version": 1,
     "robot": {
-        "type": "so101",
+        "type": "",
         "port": "",
     },
     "cameras": [],
     "calibration": {
         "status": "missing",
-        "dir": str(Path("~/.roboclaw/workspace/embodied/calibration/so101").expanduser()),
+        "dir": "",
     },
     "datasets": {
         "root": str(Path("~/.roboclaw/workspace/embodied/datasets").expanduser()),
