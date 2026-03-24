@@ -48,7 +48,7 @@ def create_setup_with_scan(path: Path = SETUP_PATH) -> dict[str, Any]:
     ports = scan_serial_ports()
     setup["scanned_ports"] = ports
     if len(ports) == 1:
-        setup["robot"]["port"] = ports[0]["by_path"] or ports[0]["by_id"] or ports[0]["dev"]
+        setup["robot"]["port"] = ports[0]["by_id"] or ports[0]["by_path"] or ports[0]["dev"]
     setup["cameras"] = scan_cameras()
     save_setup(setup, path)
     return setup
