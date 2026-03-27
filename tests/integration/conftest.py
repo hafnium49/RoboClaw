@@ -78,8 +78,6 @@ class SimulatedAgent:
         setup = self.read_setup()
         setup["arms"] = arms or []
         setup["cameras"] = cameras or []
-        setup["scanned_ports"] = json.loads(self.env["ROBOCLAW_STUB_PORTS"])
-        setup["scanned_cameras"] = json.loads(self.env["ROBOCLAW_STUB_CAMERAS"])
         self.setup_path.write_text(json.dumps(setup, indent=2), encoding="utf-8")
 
     def read_setup(self) -> dict[str, Any]:

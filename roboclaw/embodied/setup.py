@@ -11,7 +11,7 @@ from typing import Any
 _ARM_TYPES = ("so101_follower", "so101_leader")
 _ARM_FIELDS = {"alias", "type", "port", "calibration_dir", "calibrated"}
 _CAMERA_FIELDS = {"alias", "port", "width", "height", "fps"}
-_VALID_TOP_KEYS = {"version", "arms", "cameras", "datasets", "policies", "scanned_ports", "scanned_cameras"}
+_VALID_TOP_KEYS = {"version", "arms", "cameras", "datasets", "policies"}
 
 
 def get_roboclaw_home(home: str | Path | None = None) -> Path:
@@ -40,8 +40,6 @@ def _default_setup(home: Path | None = None) -> dict[str, Any]:
         "cameras": [],
         "datasets": {"root": str(base / "datasets")},
         "policies": {"root": str(base / "policies")},
-        "scanned_ports": [],
-        "scanned_cameras": [],
     }
 
 
@@ -51,6 +49,8 @@ def load_setup(path: Path | None = None) -> dict[str, Any]:
     if not path.exists():
         return _default_setup()
     setup = json.loads(path.read_text(encoding="utf-8"))
+    setup.pop("scanned_ports", None)
+    setup.pop("scanned_cameras", None)
     if isinstance(setup.get("cameras"), dict):
         setup["cameras"] = []
         save_setup(setup, path)
@@ -67,14 +67,10 @@ def save_setup(setup: dict[str, Any], path: Path | None = None) -> None:
     path.write_text(json.dumps(setup, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
 
 
-def create_setup_with_scan(path: Path | None = None) -> dict[str, Any]:
-    """Create setup.json with auto-detected hardware. Called during onboard."""
-    from roboclaw.embodied.scan import scan_cameras, scan_serial_ports
-
+def create_setup(path: Path | None = None) -> dict[str, Any]:
+    """Create a fresh setup.json. Called during onboard."""
     path = path or get_setup_path()
     setup = _default_setup()
-    setup["scanned_ports"] = scan_serial_ports()
-    setup["scanned_cameras"] = scan_cameras()
     save_setup(setup, path)
     return setup
 
@@ -219,16 +215,18 @@ def rename_arm(old_alias: str, new_alias: str, *, path: Path | None = None) -> d
 
 
 def set_camera(name: str, camera_index: int, path: Path | None = None) -> dict[str, Any]:
-    """Add or update a camera by picking from scanned_cameras by index."""
+    """Add or update a camera by picking from live-scanned cameras by index."""
+    from roboclaw.embodied.scan import scan_cameras
+
     path = path or get_setup_path()
     if not name:
         raise ValueError("Camera alias is required.")
     setup = load_setup(path)
-    scanned = setup.get("scanned_cameras", [])
+    scanned = scan_cameras()
     if camera_index < 0 or camera_index >= len(scanned):
         raise ValueError(
             f"camera_index {camera_index} out of range. "
-            f"scanned_cameras has {len(scanned)} entries."
+            f"Found {len(scanned)} camera(s)."
         )
     source = scanned[camera_index]
     port = source.get("by_path") or source.get("by_id") or source.get("dev", "")

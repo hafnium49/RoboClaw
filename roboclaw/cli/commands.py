@@ -330,12 +330,13 @@ def run_onboard_core(*, interactive: bool = True) -> None:
         console.print(f"[green]✓[/green] Created workspace at {workspace}")
     sync_workspace_templates(workspace)
 
-    from roboclaw.embodied.setup import create_setup_with_scan, get_setup_path
+    from roboclaw.embodied.setup import create_setup, get_setup_path
     if not get_setup_path().exists():
         console.print("[dim]Scanning hardware...[/dim]")
-        setup = create_setup_with_scan()
-        n_ports = len(setup.get("scanned_ports", []))
-        n_cameras = len(setup.get("scanned_cameras", []))
+        create_setup()
+        from roboclaw.embodied.scan import scan_cameras, scan_serial_ports
+        n_ports = len(scan_serial_ports())
+        n_cameras = len(scan_cameras())
         console.print(f"[green]✓[/green] Embodied setup created ({n_ports} serial port(s), {n_cameras} camera(s) detected)")
 
     if interactive:

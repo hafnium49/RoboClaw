@@ -91,7 +91,7 @@ _TOOL_GROUPS: dict[str, dict[str, Any]] = {
                 },
                 "camera_index": {
                     "type": "integer",
-                    "description": "Index into scanned_cameras for set_camera.",
+                    "description": "Index into the live-detected camera list for set_camera.",
                 },
                 "target_action": {
                     "type": "string",
@@ -308,8 +308,13 @@ async def _dispatch(action: str, kwargs: dict[str, Any], tty_handoff: Any) -> st
 # ---------------------------------------------------------------------------
 
 def _do_setup_show(kwargs: dict[str, Any]) -> str:
+    from roboclaw.embodied.scan import scan_cameras, scan_serial_ports
     from roboclaw.embodied.setup import load_setup
-    return json.dumps(load_setup(), indent=2, ensure_ascii=False)
+
+    setup = load_setup()
+    setup["scanned_ports"] = scan_serial_ports()
+    setup["scanned_cameras"] = scan_cameras()
+    return json.dumps(setup, indent=2, ensure_ascii=False)
 
 
 def _do_describe(kwargs: dict[str, Any]) -> str:
@@ -370,11 +375,9 @@ def _do_set_camera(kwargs: dict[str, Any]) -> str:
 
 
 def _do_preview_cameras(kwargs: dict[str, Any]) -> str:
-    from roboclaw.embodied.scan import capture_camera_frames
-    from roboclaw.embodied.setup import load_setup
+    from roboclaw.embodied.scan import capture_camera_frames, scan_cameras
 
-    setup = load_setup()
-    scanned_cameras = setup.get("scanned_cameras", [])
+    scanned_cameras = scan_cameras()
     if not scanned_cameras:
         return "No cameras detected."
     try:
@@ -422,10 +425,11 @@ async def _do_doctor(setup: dict[str, Any], kwargs: dict[str, Any], tty_handoff:
 
 async def _do_identify(setup: dict[str, Any], kwargs: dict[str, Any], tty_handoff: Any) -> str:
     from roboclaw.embodied.runner import LocalLeRobotRunner
+    from roboclaw.embodied.scan import scan_serial_ports
 
     if not tty_handoff:
         return _NO_TTY_MSG
-    ports = setup.get("scanned_ports", [])
+    ports = scan_serial_ports()
     if not ports:
         return "No serial ports detected."
     argv = [sys.executable, "-m", "roboclaw.embodied.identify", json.dumps(ports)]

@@ -71,8 +71,6 @@ _MOCK_SETUP = {
     ],
     "datasets": {"root": "/data"},
     "policies": {"root": "/policies"},
-    "scanned_ports": [],
-    "scanned_cameras": [],
 }
 
 
@@ -538,14 +536,6 @@ def setup_file(tmp_path: Path) -> Path:
         "cameras": [],
         "datasets": {"root": "/data"},
         "policies": {"root": "/policies"},
-        "scanned_ports": [
-            _MOCK_SCANNED_PORTS[0],
-            _MOCK_SCANNED_PORTS[1],
-        ],
-        "scanned_cameras": [
-            {"by_path": "/dev/v4l/by-path/cam0", "by_id": "usb-cam0", "dev": "/dev/video0"},
-            {"by_path": "/dev/v4l/by-path/cam1", "by_id": "usb-cam1", "dev": "/dev/video2"},
-        ],
     }
     p.write_text(json.dumps(base), encoding="utf-8")
     return p
@@ -666,8 +656,15 @@ def test_rename_arm_rejects_duplicate_alias(setup_file: Path) -> None:
         rename_arm("left_arm", "right_arm", path=setup_file)
 
 
+_MOCK_SCANNED_CAMERAS = [
+    {"by_path": "/dev/v4l/by-path/cam0", "by_id": "usb-cam0", "dev": "/dev/video0", "width": 640, "height": 480},
+    {"by_path": "/dev/v4l/by-path/cam1", "by_id": "usb-cam1", "dev": "/dev/video2", "width": 320, "height": 240},
+]
+
+
 def test_set_camera(setup_file: Path) -> None:
-    result = set_camera("front", 0, path=setup_file)
+    with std_patch("roboclaw.embodied.scan.scan_cameras", return_value=_MOCK_SCANNED_CAMERAS):
+        result = set_camera("front", 0, path=setup_file)
     cam = find_camera(result["cameras"], "front")
     assert cam is not None
     assert cam["alias"] == "front"
@@ -683,10 +680,7 @@ async def test_preview_cameras_action() -> None:
     tool = _find_tool(create_embodied_tools(), "embodied_setup")
 
     with (
-        patch(
-            "roboclaw.embodied.setup.load_setup",
-            return_value={**_MOCK_SETUP, "scanned_cameras": [{"dev": "/dev/video0"}]},
-        ),
+        patch("roboclaw.embodied.scan.scan_cameras", return_value=[{"dev": "/dev/video0"}]),
         patch("roboclaw.embodied.scan.capture_camera_frames", return_value=previews) as mock_capture,
     ):
         result = await tool.execute(action="preview_cameras")
@@ -697,12 +691,14 @@ async def test_preview_cameras_action() -> None:
 
 
 def test_set_camera_bad_index(setup_file: Path) -> None:
-    with pytest.raises(ValueError, match="out of range"):
-        set_camera("front", 99, path=setup_file)
+    with std_patch("roboclaw.embodied.scan.scan_cameras", return_value=_MOCK_SCANNED_CAMERAS):
+        with pytest.raises(ValueError, match="out of range"):
+            set_camera("front", 99, path=setup_file)
 
 
 def test_remove_camera(setup_file: Path) -> None:
-    set_camera("front", 0, path=setup_file)
+    with std_patch("roboclaw.embodied.scan.scan_cameras", return_value=_MOCK_SCANNED_CAMERAS):
+        set_camera("front", 0, path=setup_file)
     result = remove_camera("front", path=setup_file)
     assert find_camera(result["cameras"], "front") is None
 
