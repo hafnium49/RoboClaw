@@ -46,6 +46,7 @@ _ACTION_DESCRIPTIONS = {
     "rename_arm": "Rename an existing configured arm alias.",
     "remove_arm": "Remove one configured arm alias.",
     "set_camera": "Assign a scanned camera to a stable camera name.",
+    "preview_cameras": "Capture one preview image for each scanned camera.",
     "remove_camera": "Remove a configured camera.",
     "set_hand": "Create or update one configured hand alias.",
     "remove_hand": "Remove a configured hand alias.",
@@ -61,7 +62,7 @@ _ACTION_DESCRIPTIONS = {
 
 _SETUP_ACTIONS = [
     "setup_show", "set_arm", "remove_arm", "rename_arm",
-    "set_camera", "remove_camera", "describe", "doctor",
+    "set_camera", "preview_cameras", "remove_camera", "describe", "doctor",
     "set_hand", "remove_hand",
 ]
 
@@ -104,7 +105,7 @@ _TOOL_GROUPS: dict[str, dict[str, Any]] = {
                 },
                 "camera_index": {
                     "type": "integer",
-                    "description": "Index into scanned_cameras for set_camera.",
+                    "description": "Index into the live-detected camera list for set_camera.",
                 },
                 "target_action": {
                     "type": "string",
@@ -330,7 +331,7 @@ def create_embodied_tools(tty_handoff: Any = None) -> list[EmbodiedToolGroup]:
 # Actions that don't need ensure_setup (sync functions)
 _NO_SETUP_ACTIONS = frozenset({
     "setup_show", "describe", "set_arm", "rename_arm",
-    "remove_arm", "set_camera", "remove_camera",
+    "remove_arm", "set_camera", "preview_cameras", "remove_camera",
     "set_hand", "remove_hand",
 })
 
@@ -352,8 +353,13 @@ async def _dispatch(action: str, kwargs: dict[str, Any], tty_handoff: Any) -> st
 # ---------------------------------------------------------------------------
 
 def _do_setup_show(kwargs: dict[str, Any]) -> str:
+    from roboclaw.embodied.scan import scan_cameras, scan_serial_ports
     from roboclaw.embodied.setup import load_setup
-    return json.dumps(load_setup(), indent=2, ensure_ascii=False)
+
+    setup = load_setup()
+    setup["scanned_ports"] = scan_serial_ports()
+    setup["scanned_cameras"] = scan_cameras()
+    return json.dumps(setup, indent=2, ensure_ascii=False)
 
 
 def _do_describe(kwargs: dict[str, Any]) -> str:
@@ -402,14 +408,30 @@ def _do_remove_arm(kwargs: dict[str, Any]) -> str:
 
 
 def _do_set_camera(kwargs: dict[str, Any]) -> str:
-    from roboclaw.embodied.setup import set_camera
+    from roboclaw.embodied.setup import find_camera, set_camera
 
     name = kwargs.get("camera_name", "")
     index = kwargs.get("camera_index")
     if not name or index is None:
         return "set_camera requires camera_name and camera_index."
     updated = set_camera(name, index)
-    return f"Camera '{name}' configured.\n{json.dumps(updated['cameras'][name], indent=2)}"
+    cam = find_camera(updated["cameras"], name)
+    return f"Camera '{name}' configured.\n{json.dumps(cam, indent=2)}"
+
+
+def _do_preview_cameras(kwargs: dict[str, Any]) -> str:
+    from roboclaw.embodied.scan import capture_camera_frames, scan_cameras
+
+    scanned_cameras = scan_cameras()
+    if not scanned_cameras:
+        return "No cameras detected."
+    try:
+        previews = capture_camera_frames(scanned_cameras, _camera_previews_dir())
+    except RuntimeError as exc:
+        return f"Camera preview failed: {exc}"
+    if not previews:
+        return "No camera previews captured."
+    return json.dumps(previews, indent=2, ensure_ascii=False)
 
 
 def _do_remove_camera(kwargs: dict[str, Any]) -> str:
@@ -452,6 +474,7 @@ _SYNC_DISPATCH: dict[str, Any] = {
     "rename_arm": _do_rename_arm,
     "remove_arm": _do_remove_arm,
     "set_camera": _do_set_camera,
+    "preview_cameras": _do_preview_cameras,
     "remove_camera": _do_remove_camera,
     "set_hand": _do_set_hand,
     "remove_hand": _do_remove_hand,
@@ -472,17 +495,18 @@ async def _do_doctor(setup: dict[str, Any], kwargs: dict[str, Any], tty_handoff:
 
 async def _do_identify(setup: dict[str, Any], kwargs: dict[str, Any], tty_handoff: Any) -> str:
     from roboclaw.embodied.runner import LocalLeRobotRunner
+    from roboclaw.embodied.scan import scan_serial_ports
 
     if not tty_handoff:
         return _NO_TTY_MSG
-    ports = setup.get("scanned_ports", [])
+    ports = scan_serial_ports()
     if not ports:
         return "No serial ports detected."
     argv = [sys.executable, "-m", "roboclaw.embodied.identify", json.dumps(ports)]
-    rc = await _run_tty(tty_handoff, LocalLeRobotRunner(), argv, "identify-arms")
+    rc, stderr_text = await _run_tty(tty_handoff, LocalLeRobotRunner(), argv, "identify-arms")
     if rc == 0:
         return "Arm identification complete."
-    return f"Arm identification failed (exit {rc})."
+    return _format_tty_failure("Arm identification failed", rc, stderr_text)
 
 
 async def _do_calibrate(setup: dict[str, Any], kwargs: dict[str, Any], tty_handoff: Any) -> str:
@@ -509,7 +533,7 @@ async def _do_calibrate(setup: dict[str, Any], kwargs: dict[str, Any], tty_hando
         argv = controller.calibrate(
             arm["type"], arm["port"], arm.get("calibration_dir", ""), _arm_id(arm),
         )
-        rc = await _run_tty(tty_handoff, runner, argv, f"Calibrating: {display}")
+        rc, stderr_text = await _run_tty(tty_handoff, runner, argv, f"Calibrating: {display}")
         if _is_interrupted(rc):
             return "interrupted"
         if rc == 0:
@@ -518,7 +542,7 @@ async def _do_calibrate(setup: dict[str, Any], kwargs: dict[str, Any], tty_hando
             results.append(f"{display}: OK")
             continue
         failed += 1
-        results.append(f"{display}: FAILED (exit {rc})")
+        results.append(_format_tty_failure(f"{display}: FAILED", rc, stderr_text))
     return (
         f"{succeeded} succeeded, {failed} failed.\n"
         + "\n".join(results)
@@ -560,10 +584,12 @@ async def _teleoperate_single(
         teleop_id=_arm_id(leader),
     )
     label = f"lerobot-teleoperate ({arm_display_name(follower)} + {arm_display_name(leader)})"
-    rc = await _run_tty(tty_handoff, LocalLeRobotRunner(), argv, label)
+    rc, stderr_text = await _run_tty(tty_handoff, LocalLeRobotRunner(), argv, label)
     if _is_interrupted(rc):
         return "interrupted"
-    return "Teleoperation finished." if rc == 0 else f"Teleoperation failed (exit {rc})."
+    if rc == 0:
+        return "Teleoperation finished."
+    return _format_tty_failure("Teleoperation failed", rc, stderr_text)
 
 
 async def _teleoperate_bimanual(
@@ -585,10 +611,14 @@ async def _teleoperate_bimanual(
             left_teleop=leaders[0],
             right_teleop=leaders[1],
         )
-        rc = await _run_tty(tty_handoff, LocalLeRobotRunner(), argv, "lerobot-teleoperate (bimanual)")
+        rc, stderr_text = await _run_tty(
+            tty_handoff, LocalLeRobotRunner(), argv, "lerobot-teleoperate (bimanual)",
+        )
     if _is_interrupted(rc):
         return "interrupted"
-    return "Teleoperation finished." if rc == 0 else f"Teleoperation failed (exit {rc})."
+    if rc == 0:
+        return "Teleoperation finished."
+    return _format_tty_failure("Teleoperation failed", rc, stderr_text)
 
 
 async def _do_record(setup: dict[str, Any], kwargs: dict[str, Any], tty_handoff: Any) -> str:
@@ -625,7 +655,7 @@ def _build_record_kwargs(
         "cameras": cameras,
         "repo_id": f"local/{dataset_name}",
         "task": kwargs.get("task", "default_task"),
-        "dataset_root": str(_dataset_root(setup)),
+        "dataset_root": str(_dataset_path(setup, dataset_name)),
         "push_to_hub": False,
         "fps": kwargs.get("fps", 30),
         "num_episodes": kwargs.get("num_episodes", 10),
@@ -648,10 +678,12 @@ async def _record_single(
         teleop_id=_arm_id(leader),
         **record_kwargs,
     )
-    rc = await _run_tty(tty_handoff, LocalLeRobotRunner(), argv, "lerobot-record")
+    rc, stderr_text = await _run_tty(tty_handoff, LocalLeRobotRunner(), argv, "lerobot-record")
     if _is_interrupted(rc):
         return "interrupted"
-    return "Recording finished." if rc == 0 else f"Recording failed (exit {rc})."
+    if rc == 0:
+        return "Recording finished."
+    return _format_tty_failure("Recording failed", rc, stderr_text)
 
 
 async def _record_bimanual(
@@ -675,10 +707,12 @@ async def _record_bimanual(
             right_teleop=leaders[1],
             **record_kwargs,
         )
-        rc = await _run_tty(tty_handoff, LocalLeRobotRunner(), argv, "lerobot-record")
+        rc, stderr_text = await _run_tty(tty_handoff, LocalLeRobotRunner(), argv, "lerobot-record")
     if _is_interrupted(rc):
         return "interrupted"
-    return "Recording finished." if rc == 0 else f"Recording failed (exit {rc})."
+    if rc == 0:
+        return "Recording finished."
+    return _format_tty_failure("Recording failed", rc, stderr_text)
 
 
 async def _do_run_policy(setup: dict[str, Any], kwargs: dict[str, Any], tty_handoff: Any) -> str:
@@ -728,7 +762,7 @@ async def _do_replay(setup: dict[str, Any], kwargs: dict[str, Any], tty_handoff:
     error = _validate_dataset_name(dataset_name)
     if error:
         return error
-    dataset_root = _dataset_root(setup, fallback=_DEFAULT_REPLAY_ROOT)
+    dataset_root = _dataset_path(setup, dataset_name, fallback=_DEFAULT_REPLAY_ROOT)
     episode = kwargs.get("episode", 0)
     fps = kwargs.get("fps", 30)
     controller = SO101Controller()
@@ -754,10 +788,12 @@ async def _replay_single(
         episode=episode,
         fps=fps,
     )
-    rc = await _run_tty(tty_handoff, LocalLeRobotRunner(), argv, "lerobot-replay")
+    rc, stderr_text = await _run_tty(tty_handoff, LocalLeRobotRunner(), argv, "lerobot-replay")
     if _is_interrupted(rc):
         return "interrupted"
-    return "Replay finished." if rc == 0 else f"Replay failed (exit {rc})."
+    if rc == 0:
+        return "Replay finished."
+    return _format_tty_failure("Replay failed", rc, stderr_text)
 
 
 async def _replay_bimanual(
@@ -778,10 +814,14 @@ async def _replay_bimanual(
             episode=episode,
             fps=fps,
         )
-        rc = await _run_tty(tty_handoff, LocalLeRobotRunner(), argv, "lerobot-replay (bimanual)")
+        rc, stderr_text = await _run_tty(
+            tty_handoff, LocalLeRobotRunner(), argv, "lerobot-replay (bimanual)",
+        )
     if _is_interrupted(rc):
         return "interrupted"
-    return "Replay finished." if rc == 0 else f"Replay failed (exit {rc})."
+    if rc == 0:
+        return "Replay finished."
+    return _format_tty_failure("Replay failed", rc, stderr_text)
 
 
 async def _do_train(setup: dict[str, Any], kwargs: dict[str, Any], tty_handoff: Any) -> str:
@@ -792,7 +832,7 @@ async def _do_train(setup: dict[str, Any], kwargs: dict[str, Any], tty_handoff: 
     error = _validate_dataset_name(dataset_name)
     if error:
         return error
-    dataset_root = _dataset_root(setup)
+    dataset_root = _dataset_path(setup, dataset_name)
     policies_root = setup.get("policies", {}).get("root", "")
     argv = ACTPipeline().train(
         repo_id=f"local/{dataset_name}",
@@ -838,13 +878,23 @@ class ActionError(Exception):
 
 
 def _resolve_cameras(setup: dict[str, Any]) -> dict[str, dict]:
-    cameras = setup.get("cameras", {})
+    cameras = setup.get("cameras", [])
     result = {}
-    for name, cam in cameras.items():
-        path = cam.get("by_path") or cam.get("dev", "")
-        if not path:
+    for cam in cameras:
+        alias = cam.get("alias", "")
+        port = cam.get("port", "")
+        if not alias or not port:
             continue
-        result[name] = {"type": "opencv", "index_or_path": path}
+        config = {
+            "type": "opencv",
+            "index_or_path": port,
+            "width": cam.get("width", 640),
+            "height": cam.get("height", 480),
+        }
+        fps = cam.get("fps")
+        if fps is not None:
+            config["fps"] = fps
+        result[alias] = config
     return result
 
 
@@ -855,7 +905,9 @@ def _resolve_action_arms(setup: dict[str, Any], kwargs: dict[str, Any]) -> list[
         raise ActionError(str(exc)) from exc
 
 
-async def _run_tty(tty_handoff: Any, runner: Any, argv: list[str], label: str) -> int:
+async def _run_tty(
+    tty_handoff: Any, runner: Any, argv: list[str], label: str,
+) -> tuple[int, str]:
     await tty_handoff(start=True, label=label)
     try:
         return await runner.run_interactive(argv)
@@ -929,6 +981,12 @@ def _dataset_root(setup: dict[str, Any], fallback: Path | None = None) -> Path:
     return get_roboclaw_home() / "workspace" / "embodied" / "datasets"
 
 
+def _dataset_path(
+    setup: dict[str, Any], dataset_name: str, fallback: Path | None = None,
+) -> Path:
+    return _dataset_root(setup, fallback) / "local" / dataset_name
+
+
 def _arm_id(arm: dict[str, Any]) -> str:
     arm_id = Path(arm.get("calibration_dir", "")).name
     if not arm_id:
@@ -944,6 +1002,18 @@ def _validate_dataset_name(dataset_name: str) -> str | None:
     if not dataset_name or not _DATASET_SLUG_RE.match(dataset_name):
         return "dataset_name must be a non-empty ASCII slug (letters, numbers, underscores, hyphens)."
     return None
+
+
+def _camera_previews_dir() -> Path:
+    return get_roboclaw_home() / "workspace" / "embodied" / "camera_previews"
+
+
+def _format_tty_failure(prefix: str, returncode: int, stderr_text: str) -> str:
+    message = f"{prefix} (exit {returncode})."
+    stderr_text = stderr_text.strip()
+    if not stderr_text:
+        return message
+    return f"{message}\nstderr: {stderr_text}"
 
 
 @contextmanager

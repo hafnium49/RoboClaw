@@ -7,27 +7,17 @@ import pytest
 from roboclaw.embodied.tool import create_embodied_tools, EmbodiedToolGroup
 
 
-_MOCK_SETUP_WITH_PORTS = {
+_MOCK_SETUP = {
     "version": 2,
     "arms": [],
-    "cameras": {},
+    "cameras": [],
     "datasets": {"root": "/data"},
     "policies": {"root": "/policies"},
-    "scanned_ports": [
-        {"by_path": "/dev/serial/by-path/pci-0:2.1", "by_id": "/dev/serial/by-id/usb-ABC-if00", "dev": "/dev/ttyACM0"},
-    ],
-    "scanned_cameras": [],
 }
 
-_MOCK_SETUP_NO_PORTS = {
-    "version": 2,
-    "arms": [],
-    "cameras": {},
-    "datasets": {"root": "/data"},
-    "policies": {"root": "/policies"},
-    "scanned_ports": [],
-    "scanned_cameras": [],
-}
+_MOCK_PORTS = [
+    {"by_path": "/dev/serial/by-path/pci-0:2.1", "by_id": "/dev/serial/by-id/usb-ABC-if00", "dev": "/dev/ttyACM0"},
+]
 
 
 def _hw_tool(tty_handoff=None) -> EmbodiedToolGroup:
@@ -39,7 +29,7 @@ def _hw_tool(tty_handoff=None) -> EmbodiedToolGroup:
 async def test_identify_no_tty() -> None:
     """Identify without TTY handoff should return the no-TTY message."""
     tool = _hw_tool()  # no tty_handoff
-    with patch("roboclaw.embodied.setup.ensure_setup", return_value=_MOCK_SETUP_WITH_PORTS):
+    with patch("roboclaw.embodied.setup.ensure_setup", return_value=_MOCK_SETUP):
         result = await tool.execute(action="identify")
     assert "local terminal" in result.lower()
 
@@ -48,7 +38,10 @@ async def test_identify_no_tty() -> None:
 async def test_identify_no_ports() -> None:
     """Identify with empty scanned_ports should return an error message."""
     tool = _hw_tool(tty_handoff=AsyncMock())
-    with patch("roboclaw.embodied.setup.ensure_setup", return_value=_MOCK_SETUP_NO_PORTS):
+    with (
+        patch("roboclaw.embodied.setup.ensure_setup", return_value=_MOCK_SETUP),
+        patch("roboclaw.embodied.scan.scan_serial_ports", return_value=[]),
+    ):
         result = await tool.execute(action="identify")
     assert result == "No serial ports detected."
 
@@ -59,10 +52,11 @@ async def test_identify_success() -> None:
     mock_handoff = AsyncMock()
     tool = _hw_tool(tty_handoff=mock_handoff)
     mock_runner = AsyncMock()
-    mock_runner.run_interactive.return_value = 0
+    mock_runner.run_interactive.return_value = (0, "")
 
     with (
-        patch("roboclaw.embodied.setup.ensure_setup", return_value=_MOCK_SETUP_WITH_PORTS),
+        patch("roboclaw.embodied.setup.ensure_setup", return_value=_MOCK_SETUP),
+        patch("roboclaw.embodied.scan.scan_serial_ports", return_value=_MOCK_PORTS),
         patch("roboclaw.embodied.runner.LocalLeRobotRunner", return_value=mock_runner),
     ):
         result = await tool.execute(action="identify")
@@ -78,10 +72,11 @@ async def test_identify_failure() -> None:
     """Identify subprocess failure should report the exit code."""
     tool = _hw_tool(tty_handoff=AsyncMock())
     mock_runner = AsyncMock()
-    mock_runner.run_interactive.return_value = 1
+    mock_runner.run_interactive.return_value = (1, "identify subprocess error")
 
     with (
-        patch("roboclaw.embodied.setup.ensure_setup", return_value=_MOCK_SETUP_WITH_PORTS),
+        patch("roboclaw.embodied.setup.ensure_setup", return_value=_MOCK_SETUP),
+        patch("roboclaw.embodied.scan.scan_serial_ports", return_value=_MOCK_PORTS),
         patch("roboclaw.embodied.runner.LocalLeRobotRunner", return_value=mock_runner),
     ):
         result = await tool.execute(action="identify")

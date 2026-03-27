@@ -330,12 +330,13 @@ def run_onboard_core(*, interactive: bool = True) -> None:
         console.print(f"[green]✓[/green] Created workspace at {workspace}")
     sync_workspace_templates(workspace)
 
-    from roboclaw.embodied.setup import create_setup_with_scan, get_setup_path
+    from roboclaw.embodied.setup import create_setup, get_setup_path
     if not get_setup_path().exists():
         console.print("[dim]Scanning hardware...[/dim]")
-        setup = create_setup_with_scan()
-        n_ports = len(setup.get("scanned_ports", []))
-        n_cameras = len(setup.get("scanned_cameras", []))
+        create_setup()
+        from roboclaw.embodied.scan import scan_cameras, scan_serial_ports
+        n_ports = len(scan_serial_ports())
+        n_cameras = len(scan_cameras())
         console.print(f"[green]✓[/green] Embodied setup created ({n_ports} serial port(s), {n_cameras} camera(s) detected)")
 
     if interactive:
@@ -1137,9 +1138,18 @@ def _register_login(name: str):
     return decorator
 
 
+def _oauth_print(s: str) -> None:
+    """Print with Rich, but use plain print for URLs to avoid wrapping."""
+    if s.startswith("http://") or s.startswith("https://"):
+        print(s)
+    else:
+        console.print(s)
+
+
 @provider_app.command("login")
 def provider_login(
     provider: str = typer.Argument(..., help="OAuth provider (e.g. 'openai-codex', 'github-copilot')"),
+    force: bool = typer.Option(False, "--force", "-f", help="Force re-authentication even if already logged in"),
 ):
     """Authenticate with an OAuth provider."""
     from roboclaw.providers.registry import PROVIDERS
@@ -1157,35 +1167,42 @@ def provider_login(
         raise typer.Exit(1)
 
     console.print(f"{__logo__} OAuth Login - {spec.label}\n")
-    handler()
+    handler(force=force)
 
 
 @_register_login("openai_codex")
-def _login_openai_codex() -> None:
+def _login_openai_codex(force: bool = False) -> None:
     try:
         from oauth_cli_kit import get_token, login_oauth_interactive
-        token = None
-        try:
-            token = get_token()
-        except RuntimeError:
-            pass
-        if not (token and token.access):
-            console.print("[cyan]Starting interactive OAuth login...[/cyan]\n")
-            token = login_oauth_interactive(
-                print_fn=lambda s: console.print(s),
-                prompt_fn=lambda s: typer.prompt(s),
-            )
-        if not (token and token.access):
-            console.print("[red]✗ Authentication failed[/red]")
-            raise typer.Exit(1)
-        console.print(f"[green]✓ Authenticated with OpenAI Codex[/green]  [dim]{token.account_id}[/dim]")
     except ImportError:
         console.print("[red]oauth_cli_kit not installed. Run: pip install oauth-cli-kit[/red]")
         raise typer.Exit(1)
 
+    if not force:
+        try:
+            token = get_token()
+        except RuntimeError:
+            token = None
+        if token and token.access:
+            console.print(f"[green]✓ Already authenticated[/green]  [dim]{token.account_id}[/dim]")
+            console.print("[dim]Use --force to re-authenticate[/dim]")
+            return
+
+    console.print("[cyan]Starting interactive OAuth login...[/cyan]\n")
+    token = login_oauth_interactive(
+        print_fn=_oauth_print,
+        prompt_fn=lambda s: typer.prompt(s),
+        originator="roboclaw",
+    )
+    if not (token and token.access):
+        console.print("[red]✗ Authentication failed[/red]")
+        raise typer.Exit(1)
+    console.print(f"[green]✓ Authenticated with OpenAI Codex[/green]  [dim]{token.account_id}[/dim]")
+
 
 @_register_login("github_copilot")
-def _login_github_copilot() -> None:
+def _login_github_copilot(force: bool = False) -> None:
+    # GitHub Copilot uses device flow via LiteLLM — no local token cache to check
     import asyncio
 
     console.print("[cyan]Starting GitHub Copilot device flow...[/cyan]\n")

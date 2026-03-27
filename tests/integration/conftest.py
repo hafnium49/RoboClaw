@@ -73,13 +73,11 @@ class SimulatedAgent:
         self,
         *,
         arms: list[dict[str, Any]] | None = None,
-        cameras: dict[str, dict[str, Any]] | None = None,
+        cameras: list[dict[str, Any]] | None = None,
     ) -> None:
         setup = self.read_setup()
         setup["arms"] = arms or []
-        setup["cameras"] = cameras or {}
-        setup["scanned_ports"] = json.loads(self.env["ROBOCLAW_STUB_PORTS"])
-        setup["scanned_cameras"] = json.loads(self.env["ROBOCLAW_STUB_CAMERAS"])
+        setup["cameras"] = cameras or []
         self.setup_path.write_text(json.dumps(setup, indent=2), encoding="utf-8")
 
     def read_setup(self) -> dict[str, Any]:

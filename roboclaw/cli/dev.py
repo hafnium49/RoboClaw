@@ -20,12 +20,15 @@ def reset(
     provider: Optional[str] = typer.Option(None, help="Provider name to set in config.json."),
     api_base: Optional[str] = typer.Option(None, help="API base URL to set."),
     api_key: Optional[str] = typer.Option(None, help="API key to set."),
+    keep_calibration: bool = typer.Option(False, "--keep-calibration", help="Preserve calibration files."),
+    keep_setup: bool = typer.Option(False, "--keep-setup", help="Preserve setup.json (arms, cameras)."),
     yes: bool = typer.Option(False, "--yes", "-y", help="Skip confirmation prompt."),
 ) -> None:
     """Delete workspace and re-run onboard non-interactively.
 
     Useful for returning to a clean state during development.
     Optionally patches config.json with --model / --provider / --api-base / --api-key.
+    Use --keep-calibration and/or --keep-setup to preserve hardware state.
     """
     from roboclaw.config.loader import get_config_path
     from roboclaw.config.paths import get_workspace_path
@@ -37,13 +40,17 @@ def reset(
         _console.print(f"[yellow]This will delete:[/yellow]")
         _console.print(f"  - {workspace}")
         _console.print(f"  - {config_path}")
+        if keep_calibration:
+            _console.print(f"  [dim](keeping calibration files)[/dim]")
+        if keep_setup:
+            _console.print(f"  [dim](keeping setup.json)[/dim]")
         if not typer.confirm("Continue?"):
             raise typer.Abort()
 
-    # 1. Delete workspace and config
+    # 1. Delete workspace and config, preserving selected files
     if workspace.exists():
-        shutil.rmtree(workspace)
-        _console.print(f"[green]✓[/green] Deleted {workspace}")
+        _clean_workspace(workspace, keep_calibration=keep_calibration, keep_setup=keep_setup)
+        _console.print(f"[green]✓[/green] Cleaned {workspace}")
     if config_path.exists():
         config_path.unlink()
         _console.print(f"[green]✓[/green] Deleted {config_path}")
@@ -57,6 +64,35 @@ def reset(
     _patch_config(config_path, model=model, provider=provider, api_base=api_base, api_key=api_key)
 
     _console.print("\n[green]Dev reset complete.[/green]")
+
+
+def _clean_workspace(workspace: Path, *, keep_calibration: bool, keep_setup: bool) -> None:
+    """Delete workspace contents, optionally preserving calibration and setup."""
+    embodied = workspace / "embodied"
+    cal_dir = embodied / "calibration"
+    setup_file = embodied / "setup.json"
+
+    # Save files we want to keep
+    saved_cal = None
+    saved_setup = None
+    if keep_calibration and cal_dir.exists():
+        import tempfile
+        saved_cal = Path(tempfile.mkdtemp()) / "calibration"
+        shutil.copytree(cal_dir, saved_cal)
+    if keep_setup and setup_file.exists():
+        saved_setup = setup_file.read_bytes()
+
+    # Nuke workspace
+    shutil.rmtree(workspace)
+
+    # Restore saved files
+    if saved_cal:
+        cal_dir.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copytree(saved_cal, cal_dir)
+        shutil.rmtree(saved_cal.parent)
+    if saved_setup is not None:
+        setup_file.parent.mkdir(parents=True, exist_ok=True)
+        setup_file.write_bytes(saved_setup)
 
 
 def _patch_config(

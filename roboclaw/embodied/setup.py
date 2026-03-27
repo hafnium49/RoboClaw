@@ -12,8 +12,8 @@ _ARM_TYPES = ("so101_follower", "so101_leader")
 _ARM_FIELDS = {"alias", "type", "port", "calibration_dir", "calibrated"}
 _HAND_TYPES = ("inspire_rh56", "revo2")
 _HAND_FIELDS = {"alias", "type", "port", "slave_id"}
-_CAMERA_FIELDS = {"by_path", "by_id", "dev", "width", "height"}
-_VALID_TOP_KEYS = {"version", "arms", "hands", "cameras", "datasets", "policies", "scanned_ports", "scanned_cameras"}
+_CAMERA_FIELDS = {"alias", "port", "width", "height", "fps"}
+_VALID_TOP_KEYS = {"version", "arms", "hands", "cameras", "datasets", "policies"}
 
 
 # ── Generic device helpers ───────────────────────────────────────────
@@ -83,11 +83,9 @@ def _default_setup(home: Path | None = None) -> dict[str, Any]:
         "version": 2,
         "arms": [],
         "hands": [],
-        "cameras": {},
+        "cameras": [],
         "datasets": {"root": str(base / "datasets")},
         "policies": {"root": str(base / "policies")},
-        "scanned_ports": [],
-        "scanned_cameras": [],
     }
 
 
@@ -97,6 +95,11 @@ def load_setup(path: Path | None = None) -> dict[str, Any]:
     if not path.exists():
         return _default_setup()
     setup = json.loads(path.read_text(encoding="utf-8"))
+    setup.pop("scanned_ports", None)
+    setup.pop("scanned_cameras", None)
+    if isinstance(setup.get("cameras"), dict):
+        setup["cameras"] = []
+        save_setup(setup, path)
     if _refresh_calibration_state(setup):
         save_setup(setup, path)
     return setup
@@ -110,14 +113,10 @@ def save_setup(setup: dict[str, Any], path: Path | None = None) -> None:
     path.write_text(json.dumps(setup, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
 
 
-def create_setup_with_scan(path: Path | None = None) -> dict[str, Any]:
-    """Create setup.json with auto-detected hardware. Called during onboard."""
-    from roboclaw.embodied.scan import scan_cameras, scan_serial_ports
-
+def create_setup(path: Path | None = None) -> dict[str, Any]:
+    """Create a fresh setup.json. Called during onboard."""
     path = path or get_setup_path()
     setup = _default_setup()
-    setup["scanned_ports"] = scan_serial_ports()
-    setup["scanned_cameras"] = scan_cameras()
     save_setup(setup, path)
     return setup
 
@@ -307,32 +306,58 @@ def find_hand(hands: list[dict], alias: str) -> dict | None:
 
 
 def set_camera(name: str, camera_index: int, path: Path | None = None) -> dict[str, Any]:
-    """Add or update a camera by picking from scanned_cameras by index."""
+    """Add or update a camera by picking from live-scanned cameras by index."""
+    from roboclaw.embodied.scan import scan_cameras
+
     path = path or get_setup_path()
+    if not name:
+        raise ValueError("Camera alias is required.")
     setup = load_setup(path)
-    scanned = setup.get("scanned_cameras", [])
+    scanned = scan_cameras()
     if camera_index < 0 or camera_index >= len(scanned):
         raise ValueError(
             f"camera_index {camera_index} out of range. "
-            f"scanned_cameras has {len(scanned)} entries."
+            f"Found {len(scanned)} camera(s)."
         )
     source = scanned[camera_index]
-    entry = {field: source[field] for field in _CAMERA_FIELDS if field in source}
-    setup.setdefault("cameras", {})[name] = entry
+    port = source.get("by_path") or source.get("by_id") or source.get("dev", "")
+    if not port:
+        raise ValueError(f"Scanned camera at index {camera_index} has no usable path.")
+    entry = {
+        "alias": name,
+        "port": port,
+        "width": source.get("width", 640),
+        "height": source.get("height", 480),
+    }
+    cameras = setup.setdefault("cameras", [])
+    existing = find_camera(cameras, name)
+    if existing is not None:
+        cameras[cameras.index(existing)] = entry
+    else:
+        cameras.append(entry)
     save_setup(setup, path)
     return setup
 
 
 def remove_camera(name: str, path: Path | None = None) -> dict[str, Any]:
-    """Remove a camera by name."""
+    """Remove a camera by alias."""
     path = path or get_setup_path()
     setup = load_setup(path)
-    cameras = setup.get("cameras", {})
-    if name not in cameras:
-        raise ValueError(f"No camera named '{name}' in setup.")
-    del cameras[name]
+    cameras = setup.get("cameras", [])
+    cam = find_camera(cameras, name)
+    if cam is None:
+        raise ValueError(f"No camera with alias '{name}' in setup.")
+    cameras.remove(cam)
     save_setup(setup, path)
     return setup
+
+
+def find_camera(cameras: list[dict], alias: str) -> dict | None:
+    """Find a camera in the cameras list by alias. Returns the dict or None."""
+    for cam in cameras:
+        if cam.get("alias") == alias:
+            return cam
+    return None
 
 
 # ── Validation ───────────────────────────────────────────────────────
@@ -345,7 +370,7 @@ def _validate_setup(setup: dict[str, Any]) -> None:
         raise ValueError(f"Unknown top-level keys: {invalid_top}")
     _validate_arms(setup.get("arms", []))
     _validate_hands(setup.get("hands", []))
-    _validate_cameras(setup.get("cameras", {}))
+    _validate_cameras(setup.get("cameras", []))
 
 
 def _validate_arms(arms: Any) -> None:
@@ -360,14 +385,19 @@ def _validate_hands(hands: Any) -> None:
 
 def _validate_cameras(cameras: Any) -> None:
     """Validate all camera entries."""
-    if not isinstance(cameras, dict):
-        raise ValueError("'cameras' must be a dict.")
-    for name, cam in cameras.items():
+    if not isinstance(cameras, list):
+        raise ValueError("'cameras' must be a list.")
+    for cam in cameras:
         if not isinstance(cam, dict):
-            raise ValueError(f"Camera '{name}' must be a dict.")
-        bad_fields = set(cam.keys()) - _CAMERA_FIELDS
-        if bad_fields:
-            raise ValueError(f"Camera '{name}' has unknown fields: {bad_fields}")
+            raise ValueError(f"Each camera must be a dict, got {type(cam).__name__}.")
+        alias = cam.get("alias")
+        if not alias:
+            raise ValueError("Camera entry missing required 'alias' field.")
+        if not cam.get("port"):
+            raise ValueError(f"Camera '{alias}' missing required 'port' field.")
+        bad = set(cam.keys()) - _CAMERA_FIELDS
+        if bad:
+            raise ValueError(f"Camera '{alias}' has unknown fields: {bad}")
 
 
 def _ensure_unique_port(arms: list[dict], alias: str, port: str) -> None:
@@ -403,4 +433,3 @@ def _migrate_none_calibration_file(calibration_dir: Path, serial: str) -> None:
     target = calibration_dir / f"{serial}.json"
     if legacy.exists() and not target.exists():
         legacy.rename(target)
-

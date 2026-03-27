@@ -14,6 +14,7 @@ from unittest.mock import patch as std_patch
 from roboclaw.embodied.setup import (
     arm_display_name,
     find_arm,
+    find_camera,
     find_hand,
     get_calibration_root,
     load_setup,
@@ -28,7 +29,9 @@ from roboclaw.embodied.setup import (
 )
 from roboclaw.embodied.tool import (
     EmbodiedToolGroup,
+    _dataset_path,
     _group_arms,
+    _resolve_cameras,
     _resolve_arms,
     create_embodied_tools,
 )
@@ -68,13 +71,11 @@ _MOCK_SETUP = {
         },
     ],
     "hands": [],
-    "cameras": {
-        "front": {"by_path": "", "by_id": "", "dev": "/dev/video0"},
-    },
+    "cameras": [
+        {"alias": "front", "port": "/dev/video0", "width": 640, "height": 480},
+    ],
     "datasets": {"root": "/data"},
     "policies": {"root": "/policies"},
-    "scanned_ports": [],
-    "scanned_cameras": [],
 }
 
 
@@ -110,6 +111,7 @@ def test_setup_tool_schema() -> None:
     assert "port" in params["properties"]
     assert "arm_type" in params["properties"]
     assert "target_action" in params["properties"]
+    assert "preview_cameras" in params["properties"]["action"]["enum"]
     # These params should NOT be in setup
     assert "dataset_name" not in params["properties"]
     assert "checkpoint_path" not in params["properties"]
@@ -197,7 +199,7 @@ async def test_doctor_action() -> None:
 async def test_calibrate_all_arms() -> None:
     tool = _find_tool(create_embodied_tools(tty_handoff=AsyncMock()), "embodied_hardware")
     mock_runner = AsyncMock()
-    mock_runner.run_interactive.return_value = 0
+    mock_runner.run_interactive.return_value = (0, "")
 
     with (
         patch("builtins.print") as mock_print,
@@ -223,7 +225,7 @@ async def test_calibrate_selected_arms_even_if_calibrated() -> None:
     }
     tool = _find_tool(create_embodied_tools(tty_handoff=AsyncMock()), "embodied_hardware")
     mock_runner = AsyncMock()
-    mock_runner.run_interactive.return_value = 0
+    mock_runner.run_interactive.return_value = (0, "")
 
     with (
         patch("builtins.print"),
@@ -257,7 +259,7 @@ async def test_calibrate_missing_arm() -> None:
 async def test_calibrate_interrupted_on_sigint() -> None:
     tool = _find_tool(create_embodied_tools(tty_handoff=AsyncMock()), "embodied_hardware")
     mock_runner = AsyncMock()
-    mock_runner.run_interactive.side_effect = [0, 130]
+    mock_runner.run_interactive.side_effect = [(0, ""), (130, "")]
 
     with (
         patch("builtins.print"),
@@ -275,7 +277,7 @@ async def test_calibrate_interrupted_on_sigint() -> None:
 async def test_record_action() -> None:
     tool = _find_tool(create_embodied_tools(tty_handoff=AsyncMock()), "embodied_control")
     mock_runner = AsyncMock()
-    mock_runner.run_interactive.return_value = 0
+    mock_runner.run_interactive.return_value = (0, "")
 
     with (
         patch("roboclaw.embodied.setup.ensure_setup", return_value=_MOCK_SETUP),
@@ -294,16 +296,37 @@ async def test_record_action() -> None:
     assert argv[:4] == [sys.executable, "-m", "roboclaw.embodied.lerobot_wrapper", "record"]
     assert "--robot.type=so101_follower" in argv
     assert "--teleop.type=so101_leader" in argv
-    assert "--dataset.root=/data" in argv
+    assert "--dataset.root=/data/local/test" in argv
     assert "--dataset.push_to_hub=false" in argv
     assert any("--robot.cameras=" in arg for arg in argv)
+
+
+@pytest.mark.asyncio
+async def test_record_action_includes_stderr_on_failure() -> None:
+    tool = _find_tool(create_embodied_tools(tty_handoff=AsyncMock()), "embodied_control")
+    mock_runner = AsyncMock()
+    mock_runner.run_interactive.return_value = (7, "camera init failed")
+
+    with (
+        patch("roboclaw.embodied.setup.ensure_setup", return_value=_MOCK_SETUP),
+        patch("roboclaw.embodied.runner.LocalLeRobotRunner", return_value=mock_runner),
+    ):
+        result = await tool.execute(
+            action="record",
+            dataset_name="test",
+            task="grasp",
+            arms=f"{_FOLLOWER_PORT},{_LEADER_PORT}",
+        )
+
+    assert "Recording failed (exit 7)." in result
+    assert "camera init failed" in result
 
 
 @pytest.mark.asyncio
 async def test_record_action_without_cameras() -> None:
     tool = _find_tool(create_embodied_tools(tty_handoff=AsyncMock()), "embodied_control")
     mock_runner = AsyncMock()
-    mock_runner.run_interactive.return_value = 0
+    mock_runner.run_interactive.return_value = (0, "")
 
     with (
         patch("roboclaw.embodied.setup.ensure_setup", return_value=_MOCK_SETUP),
@@ -349,7 +372,7 @@ async def test_record_bimanual() -> None:
     }
     tool = _find_tool(create_embodied_tools(tty_handoff=AsyncMock()), "embodied_control")
     mock_runner = AsyncMock()
-    mock_runner.run_interactive.return_value = 0
+    mock_runner.run_interactive.return_value = (0, "")
 
     with (
         patch("roboclaw.embodied.setup.ensure_setup", return_value=setup),
@@ -367,7 +390,7 @@ async def test_record_bimanual() -> None:
     argv = mock_runner.run_interactive.call_args.args[0]
     assert "--robot.id=bimanual" in argv
     assert "--teleop.id=bimanual" in argv
-    assert "--dataset.root=/data" in argv
+    assert "--dataset.root=/data/local/test" in argv
     assert len(mock_copy.call_args_list) == 4
 
 
@@ -375,7 +398,7 @@ async def test_record_bimanual() -> None:
 async def test_replay_single_uses_followers_only() -> None:
     tool = _find_tool(create_embodied_tools(tty_handoff=AsyncMock()), "embodied_replay")
     mock_runner = AsyncMock()
-    mock_runner.run_interactive.return_value = 0
+    mock_runner.run_interactive.return_value = (0, "")
 
     with (
         patch("roboclaw.embodied.setup.ensure_setup", return_value=_MOCK_SETUP),
@@ -387,7 +410,7 @@ async def test_replay_single_uses_followers_only() -> None:
     argv = mock_runner.run_interactive.call_args.args[0]
     assert argv[:4] == [sys.executable, "-m", "roboclaw.embodied.lerobot_wrapper", "replay"]
     assert "--robot.type=so101_follower" in argv
-    assert "--dataset.root=/data" in argv
+    assert "--dataset.root=/data/local/test" in argv
     assert "--dataset.episode=2" in argv
 
 
@@ -403,7 +426,7 @@ async def test_replay_bimanual_with_root_fallback() -> None:
     }
     tool = _find_tool(create_embodied_tools(tty_handoff=AsyncMock()), "embodied_replay")
     mock_runner = AsyncMock()
-    mock_runner.run_interactive.return_value = 0
+    mock_runner.run_interactive.return_value = (0, "")
 
     with (
         patch("roboclaw.embodied.setup.ensure_setup", return_value=setup),
@@ -415,7 +438,8 @@ async def test_replay_bimanual_with_root_fallback() -> None:
     assert "Replay finished" in result
     argv = mock_runner.run_interactive.call_args.args[0]
     assert "--robot.id=bimanual" in argv
-    assert f"--dataset.root={Path('~/.cache/huggingface/lerobot').expanduser()}" in argv
+    fallback = Path("~/.cache/huggingface/lerobot").expanduser() / "local" / "test"
+    assert f"--dataset.root={fallback}" in argv
     assert len(mock_copy.call_args_list) == 2
 
 
@@ -440,7 +464,7 @@ async def test_teleoperate_bimanual() -> None:
     }
     tool = _find_tool(create_embodied_tools(tty_handoff=AsyncMock()), "embodied_control")
     mock_runner = AsyncMock()
-    mock_runner.run_interactive.return_value = 0
+    mock_runner.run_interactive.return_value = (0, "")
 
     with (
         patch("roboclaw.embodied.setup.ensure_setup", return_value=setup),
@@ -469,6 +493,8 @@ async def test_train_action() -> None:
         result = await tool.execute(action="train", dataset_name="test", steps=5000)
 
     assert "job-abc-123" in result
+    argv = mock_runner.run_detached.call_args.kwargs["argv"]
+    assert "--dataset.root=/data/local/test" in argv
 
 
 @pytest.mark.asyncio
@@ -513,17 +539,9 @@ def setup_file(tmp_path: Path) -> Path:
         "version": 2,
         "arms": [],
         "hands": [],
-        "cameras": {},
+        "cameras": [],
         "datasets": {"root": "/data"},
         "policies": {"root": "/policies"},
-        "scanned_ports": [
-            _MOCK_SCANNED_PORTS[0],
-            _MOCK_SCANNED_PORTS[1],
-        ],
-        "scanned_cameras": [
-            {"by_path": "/dev/v4l/by-path/cam0", "by_id": "usb-cam0", "dev": "/dev/video0"},
-            {"by_path": "/dev/v4l/by-path/cam1", "by_id": "usb-cam1", "dev": "/dev/video2"},
-        ],
     }
     p.write_text(json.dumps(base), encoding="utf-8")
     return p
@@ -644,28 +662,55 @@ def test_rename_arm_rejects_duplicate_alias(setup_file: Path) -> None:
         rename_arm("left_arm", "right_arm", path=setup_file)
 
 
+_MOCK_SCANNED_CAMERAS = [
+    {"by_path": "/dev/v4l/by-path/cam0", "by_id": "usb-cam0", "dev": "/dev/video0", "width": 640, "height": 480},
+    {"by_path": "/dev/v4l/by-path/cam1", "by_id": "usb-cam1", "dev": "/dev/video2", "width": 320, "height": 240},
+]
+
+
 def test_set_camera(setup_file: Path) -> None:
-    result = set_camera("front", 0, path=setup_file)
-    cam = result["cameras"]["front"]
-    assert cam["by_path"] == "/dev/v4l/by-path/cam0"
-    assert cam["dev"] == "/dev/video0"
-    assert cam["by_id"] == "usb-cam0"
-    assert set(cam.keys()) <= {"by_path", "by_id", "dev"}
+    with std_patch("roboclaw.embodied.scan.scan_cameras", return_value=_MOCK_SCANNED_CAMERAS):
+        result = set_camera("front", 0, path=setup_file)
+    cam = find_camera(result["cameras"], "front")
+    assert cam is not None
+    assert cam["alias"] == "front"
+    assert cam["port"] == "/dev/v4l/by-path/cam0"
+    assert cam["width"] == 640
+    assert cam["height"] == 480
+    assert "fps" not in cam
+
+
+@pytest.mark.asyncio
+async def test_preview_cameras_action() -> None:
+    previews = [{"camera": "/dev/v4l/by-path/cam0", "image_path": "/tmp/front.jpg"}]
+    tool = _find_tool(create_embodied_tools(), "embodied_setup")
+
+    with (
+        patch("roboclaw.embodied.scan.scan_cameras", return_value=[{"dev": "/dev/video0"}]),
+        patch("roboclaw.embodied.scan.capture_camera_frames", return_value=previews) as mock_capture,
+    ):
+        result = await tool.execute(action="preview_cameras")
+
+    assert json.loads(result) == previews
+    output_dir = mock_capture.call_args.args[1]
+    assert output_dir == Path("~/.roboclaw").expanduser() / "workspace" / "embodied" / "camera_previews"
 
 
 def test_set_camera_bad_index(setup_file: Path) -> None:
-    with pytest.raises(ValueError, match="out of range"):
-        set_camera("front", 99, path=setup_file)
+    with std_patch("roboclaw.embodied.scan.scan_cameras", return_value=_MOCK_SCANNED_CAMERAS):
+        with pytest.raises(ValueError, match="out of range"):
+            set_camera("front", 99, path=setup_file)
 
 
 def test_remove_camera(setup_file: Path) -> None:
-    set_camera("front", 0, path=setup_file)
+    with std_patch("roboclaw.embodied.scan.scan_cameras", return_value=_MOCK_SCANNED_CAMERAS):
+        set_camera("front", 0, path=setup_file)
     result = remove_camera("front", path=setup_file)
-    assert "front" not in result["cameras"]
+    assert find_camera(result["cameras"], "front") is None
 
 
 def test_remove_camera_missing(setup_file: Path) -> None:
-    with pytest.raises(ValueError, match="No camera named"):
+    with pytest.raises(ValueError, match="No camera with alias"):
         remove_camera("nonexistent", path=setup_file)
 
 
@@ -678,7 +723,7 @@ def test_validation_rejects_unknown_arm_fields(setup_file: Path) -> None:
 
 def test_validation_rejects_unknown_camera_fields(setup_file: Path) -> None:
     bad = load_setup(setup_file)
-    bad["cameras"]["front"] = {"dev": "/dev/video0", "fps": 30}
+    bad["cameras"] = [{"alias": "front", "port": "/dev/video0", "junk": True}]
     with pytest.raises(ValueError, match="unknown fields"):
         save_setup(bad, setup_file)
 
@@ -851,3 +896,19 @@ def test_setup_schema_has_no_hand_runtime_params() -> None:
     # hand_type SHOULD be in setup (for set_hand)
     assert "hand_type" in props
     assert props["hand_type"]["enum"] == ["inspire_rh56", "revo2"]
+
+
+def test_resolve_cameras_omits_missing_fps() -> None:
+    setup = {
+        "cameras": [
+            {"alias": "front", "port": "/dev/video0", "width": 640, "height": 480},
+            {"alias": "side", "port": "/dev/video1", "width": 320, "height": 240, "fps": 15},
+        ],
+    }
+    cameras = _resolve_cameras(setup)
+    assert "fps" not in cameras["front"]
+    assert cameras["side"]["fps"] == 15
+
+
+def test_dataset_path_appends_local_and_dataset_name() -> None:
+    assert _dataset_path(_MOCK_SETUP, "demo") == Path("/data/local/demo")
