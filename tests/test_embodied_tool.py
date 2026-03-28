@@ -501,8 +501,10 @@ async def test_run_policy_no_follower_arm() -> None:
 
 
 @pytest.mark.asyncio
-async def test_run_policy_requires_single_follower() -> None:
+async def test_run_policy_bimanual() -> None:
     tool = _find_tool(create_embodied_tools(), "embodied_control")
+    mock_runner = AsyncMock()
+    mock_runner.run = AsyncMock(return_value=(0, "ok", ""))
     setup = {
         **_MOCK_SETUP,
         "arms": [
@@ -511,10 +513,16 @@ async def test_run_policy_requires_single_follower() -> None:
         ],
     }
 
-    with patch("roboclaw.embodied.setup.ensure_setup", return_value=setup):
+    with (
+        patch("roboclaw.embodied.setup.ensure_setup", return_value=setup),
+        patch("roboclaw.embodied.ops.helpers.shutil.copy2"),
+        patch("roboclaw.embodied.runner.LocalLeRobotRunner", return_value=mock_runner),
+    ):
         result = await tool.execute(action="record", checkpoint_path="/models/act")
 
-    assert "exactly 1 follower arm" in result
+    argv = mock_runner.run.call_args[0][0]
+    assert "--robot.type=bi_so_follower" in argv
+    assert "--policy.path=/models/act" in argv
 
 
 @pytest.mark.asyncio

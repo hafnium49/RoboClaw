@@ -124,13 +124,22 @@ def _try_open_camera(cv2, index: int, dev: str, by_path: dict, by_id: dict) -> d
         w = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
         h = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
         real = os.path.realpath(dev)
-        return {
+        result: dict[str, str | int] = {
             "by_path": by_path.get(real, ""),
             "by_id": by_id.get(real, ""),
             "dev": dev,
             "width": w,
             "height": h,
         }
+        fps = cap.get(cv2.CAP_PROP_FPS)
+        if fps < 30:
+            cap.set(cv2.CAP_PROP_FOURCC, cv2.VideoWriter_fourcc(*"MJPG"))
+            cap.set(cv2.CAP_PROP_FPS, 30)
+            if cap.get(cv2.CAP_PROP_FPS) >= 30:
+                result["fourcc"] = "MJPG"
+                fps = 30
+        result["fps"] = int(fps)
+        return result
     finally:
         cap.release()
 

@@ -115,6 +115,26 @@ def test_record() -> None:
     assert "--dataset.num_episodes=5" in argv
 
 
+def test_record_with_episode_time_s() -> None:
+    argv = SO101Controller().record(
+        "so101_follower", "/dev/ttyACM0", "/cal/f", "5B14032630",
+        "so101_leader", "/dev/ttyACM1", "/cal/l", "5B14030892",
+        cameras={}, repo_id="local/test", task="grasp",
+        dataset_root="/data", episode_time_s=60,
+    )
+    assert "--dataset.episode_time_s=60" in argv
+
+
+def test_record_omits_episode_time_s_when_none() -> None:
+    argv = SO101Controller().record(
+        "so101_follower", "/dev/ttyACM0", "/cal/f", "5B14032630",
+        "so101_leader", "/dev/ttyACM1", "/cal/l", "5B14030892",
+        cameras={}, repo_id="local/test", task="grasp",
+        dataset_root="/data",
+    )
+    assert not any("episode_time_s" in arg for arg in argv)
+
+
 def test_record_skips_empty_cameras() -> None:
     argv = SO101Controller().record(
         "so101_follower",
@@ -212,6 +232,27 @@ def test_run_policy() -> None:
     assert "--robot.id=5B14032630" in argv
     assert any("--policy.path=" in arg for arg in argv)
     assert any("--robot.cameras=" in arg for arg in argv)
+    assert not any("--teleop" in arg for arg in argv)
+
+
+def test_run_policy_bimanual() -> None:
+    cameras = {"front": {"type": "opencv", "index": 0}}
+    argv = SO101Controller().run_policy_bimanual(
+        robot_id="bimanual",
+        robot_cal_dir="/cal/robot",
+        left_robot={"port": "/dev/a"},
+        right_robot={"port": "/dev/b"},
+        cameras=cameras,
+        policy_path="/models/act_checkpoint",
+    )
+    assert argv[:4] == [sys.executable, "-m", "roboclaw.embodied.lerobot_wrapper", "record"]
+    assert "--robot.type=bi_so_follower" in argv
+    assert "--robot.id=bimanual" in argv
+    assert "--robot.calibration_dir=/cal/robot" in argv
+    assert "--robot.left_arm_config.port=/dev/a" in argv
+    assert "--robot.right_arm_config.port=/dev/b" in argv
+    assert any("--policy.path=" in arg for arg in argv)
+    assert any("--robot.left_arm_config.cameras=" in arg for arg in argv)
     assert not any("--teleop" in arg for arg in argv)
 
 

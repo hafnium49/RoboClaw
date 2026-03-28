@@ -202,7 +202,7 @@ async def _do_record(setup: dict[str, Any], kwargs: dict[str, Any], tty_handoff:
 def _build_record_kwargs(
     setup: dict[str, Any], kwargs: dict[str, Any], cameras: dict, dataset_name: str,
 ) -> dict[str, Any]:
-    return {
+    result = {
         "cameras": cameras,
         "repo_id": f"local/{dataset_name}",
         "task": kwargs.get("task", "default_task"),
@@ -211,6 +211,12 @@ def _build_record_kwargs(
         "fps": kwargs.get("fps", 30),
         "num_episodes": kwargs.get("num_episodes", 10),
     }
+    episode_time_s = kwargs.get("episode_time_s")
+    if episode_time_s is not None:
+        if episode_time_s <= 0:
+            raise ValueError("episode_time_s must be positive.")
+        result["episode_time_s"] = episode_time_s
+    return result
 
 
 async def _record_single(
@@ -276,12 +282,17 @@ async def _do_run_policy(setup: dict[str, Any], kwargs: dict[str, Any], tty_hand
     followers = grouped["followers"]
     if not followers:
         return "No follower arm configured."
-    if len(followers) != 1:
-        return "run_policy requires exactly 1 follower arm. Provide arms with a single follower port."
-    follower = followers[0]
+    if len(followers) not in {1, 2}:
+        return f"Unsupported follower arm count: {len(followers)}. Use 1 (single) or 2 (bimanual)."
     cameras = {} if kwargs.get("use_cameras") is False else resolve_cameras(setup)
     policies_root = setup.get("policies", {}).get("root", "")
-    checkpoint = kwargs.get("checkpoint_path") or ACTPipeline().checkpoint_path(policies_root)
+    checkpoint = kwargs.get("checkpoint_path")
+    if not checkpoint:
+        source_dataset = kwargs.get("source_dataset", kwargs.get("dataset_name", ""))
+        if source_dataset:
+            checkpoint = ACTPipeline().checkpoint_path(str(Path(policies_root) / source_dataset))
+        else:
+            checkpoint = ACTPipeline().checkpoint_path(policies_root)
     dataset_name = kwargs.get("dataset_name", "eval_default")
     error = _validate_dataset_name(dataset_name)
     if error:
@@ -289,19 +300,34 @@ async def _do_run_policy(setup: dict[str, Any], kwargs: dict[str, Any], tty_hand
     if not dataset_name.startswith("eval_"):
         dataset_name = f"eval_{dataset_name}"
     dataset_root = _dataset_path(setup, dataset_name)
-    argv = SO101Controller().run_policy(
-        robot_type=follower["type"],
-        robot_port=follower["port"],
-        robot_cal_dir=follower["calibration_dir"],
-        robot_id=_arm_id(follower),
-        cameras=cameras,
-        policy_path=checkpoint,
-        repo_id=f"local/{dataset_name}",
-        dataset_root=str(dataset_root),
-        task=kwargs.get("task", "eval"),
-        num_episodes=kwargs.get("num_episodes", 1),
-    )
-    return await _run(LocalLeRobotRunner(), argv)
+    controller = SO101Controller()
+    policy_kwargs = {
+        "cameras": cameras,
+        "policy_path": checkpoint,
+        "repo_id": f"local/{dataset_name}",
+        "dataset_root": str(dataset_root),
+        "task": kwargs.get("task", "eval"),
+        "num_episodes": kwargs.get("num_episodes", 1),
+    }
+    if len(followers) == 1:
+        follower = followers[0]
+        argv = controller.run_policy(
+            robot_type=follower["type"],
+            robot_port=follower["port"],
+            robot_cal_dir=follower["calibration_dir"],
+            robot_id=_arm_id(follower),
+            **policy_kwargs,
+        )
+        return await _run(LocalLeRobotRunner(), argv)
+    with _bimanual_cal_dirs(followers, []) as (robot_dir, _):
+        argv = controller.run_policy_bimanual(
+            robot_id=_BIMANUAL_ID,
+            robot_cal_dir=robot_dir,
+            left_robot=followers[0],
+            right_robot=followers[1],
+            **policy_kwargs,
+        )
+        return await _run(LocalLeRobotRunner(), argv)
 
 
 async def _do_replay(setup: dict[str, Any], kwargs: dict[str, Any], tty_handoff: Any) -> str:

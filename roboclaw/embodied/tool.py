@@ -126,6 +126,10 @@ _TOOL_GROUPS: dict[str, dict[str, Any]] = {
                     "type": "integer",
                     "description": "Frames per second for recording.",
                 },
+                "episode_time_s": {
+                    "type": "integer",
+                    "description": "Duration per episode in seconds.",
+                },
                 "checkpoint_path": {
                     "type": "string",
                     "description": "Path to a trained policy checkpoint (turns record into policy inference).",

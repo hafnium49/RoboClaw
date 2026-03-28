@@ -323,12 +323,16 @@ def set_camera(name: str, camera_index: int, path: Path | None = None) -> dict[s
     port = source.get("by_path") or source.get("by_id") or source.get("dev", "")
     if not port:
         raise ValueError(f"Scanned camera at index {camera_index} has no usable path.")
-    entry = {
+    entry: dict[str, Any] = {
         "alias": name,
         "port": port,
         "width": source.get("width", 640),
         "height": source.get("height", 480),
     }
+    if source.get("fps"):
+        entry["fps"] = source["fps"]
+    if source.get("fourcc"):
+        entry["fourcc"] = source["fourcc"]
     cameras = setup.setdefault("cameras", [])
     existing = find_camera(cameras, name)
     if existing is not None:
@@ -354,10 +358,7 @@ def remove_camera(name: str, path: Path | None = None) -> dict[str, Any]:
 
 def find_camera(cameras: list[dict], alias: str) -> dict | None:
     """Find a camera in the cameras list by alias. Returns the dict or None."""
-    for cam in cameras:
-        if cam.get("alias") == alias:
-            return cam
-    return None
+    return _find_by_alias(cameras, alias)
 
 
 # ── Validation ───────────────────────────────────────────────────────
