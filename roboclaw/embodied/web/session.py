@@ -12,6 +12,7 @@ from loguru import logger
 
 from roboclaw.embodied.ops.helpers import (
     _arm_id,
+    _bimanual_cal_dirs,
     _dataset_path,
     _group_arms,
     _resolve_action_arms,
@@ -130,17 +131,31 @@ class RobotSession:
         followers = self._grouped["followers"]
         leaders = self._grouped["leaders"]
 
-        return controller.teleoperate(
-            robot_type=followers[0]["type"],
-            robot_port=followers[0]["port"],
-            robot_cal_dir=followers[0]["calibration_dir"],
-            robot_id=_arm_id(followers[0]),
-            teleop_type=leaders[0]["type"],
-            teleop_port=leaders[0]["port"],
-            teleop_cal_dir=leaders[0]["calibration_dir"],
-            teleop_id=_arm_id(leaders[0]),
-            cameras=self._cameras,
-        )
+        if len(followers) == 1:
+            return controller.teleoperate(
+                robot_type=followers[0]["type"],
+                robot_port=followers[0]["port"],
+                robot_cal_dir=followers[0]["calibration_dir"],
+                robot_id=_arm_id(followers[0]),
+                teleop_type=leaders[0]["type"],
+                teleop_port=leaders[0]["port"],
+                teleop_cal_dir=leaders[0]["calibration_dir"],
+                teleop_id=_arm_id(leaders[0]),
+                cameras=self._cameras,
+            )
+
+        with _bimanual_cal_dirs(followers, leaders) as (robot_dir, teleop_dir):
+            return controller.teleoperate_bimanual(
+                robot_id="bimanual",
+                robot_cal_dir=robot_dir,
+                left_robot=followers[0],
+                right_robot=followers[1],
+                teleop_id="bimanual",
+                teleop_cal_dir=teleop_dir,
+                left_teleop=leaders[0],
+                right_teleop=leaders[1],
+                cameras=self._cameras,
+            )
 
     def _build_record_argv(
         self, dataset_name: str, task: str, fps: int, num_episodes: int,
@@ -151,23 +166,40 @@ class RobotSession:
         followers = self._grouped["followers"]
         leaders = self._grouped["leaders"]
         ds_path = _dataset_path(self._setup, dataset_name)
+        record_kwargs: dict[str, Any] = {
+            "cameras": self._cameras,
+            "repo_id": dataset_name,
+            "dataset_root": str(ds_path.parent),
+            "task": task,
+            "fps": fps,
+            "num_episodes": num_episodes,
+        }
 
-        return controller.record(
-            robot_type=followers[0]["type"],
-            robot_port=followers[0]["port"],
-            robot_cal_dir=followers[0]["calibration_dir"],
-            robot_id=_arm_id(followers[0]),
-            teleop_type=leaders[0]["type"],
-            teleop_port=leaders[0]["port"],
-            teleop_cal_dir=leaders[0]["calibration_dir"],
-            teleop_id=_arm_id(leaders[0]),
-            cameras=self._cameras,
-            repo_id=dataset_name,
-            dataset_root=str(ds_path.parent),
-            task=task,
-            fps=fps,
-            num_episodes=num_episodes,
-        )
+        if len(followers) == 1:
+            return controller.record(
+                robot_type=followers[0]["type"],
+                robot_port=followers[0]["port"],
+                robot_cal_dir=followers[0]["calibration_dir"],
+                robot_id=_arm_id(followers[0]),
+                teleop_type=leaders[0]["type"],
+                teleop_port=leaders[0]["port"],
+                teleop_cal_dir=leaders[0]["calibration_dir"],
+                teleop_id=_arm_id(leaders[0]),
+                **record_kwargs,
+            )
+
+        with _bimanual_cal_dirs(followers, leaders) as (robot_dir, teleop_dir):
+            return controller.record_bimanual(
+                robot_id="bimanual",
+                robot_cal_dir=robot_dir,
+                left_robot=followers[0],
+                right_robot=followers[1],
+                teleop_id="bimanual",
+                teleop_cal_dir=teleop_dir,
+                left_teleop=leaders[0],
+                right_teleop=leaders[1],
+                **record_kwargs,
+            )
 
     # -- Subprocess management -----------------------------------------
 

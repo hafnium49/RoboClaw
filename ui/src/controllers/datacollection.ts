@@ -24,6 +24,7 @@ interface HeaderStats {
 
 interface DataCollectionStore {
   state: RobotState
+  loading: string | null
   datasets: Dataset[]
   logs: LogEntry[]
   stats: HeaderStats
@@ -81,6 +82,7 @@ let statusReconnectTimer: ReturnType<typeof setTimeout> | null = null
 
 export const useDataCollection = create<DataCollectionStore>((set, get) => ({
   state: 'disconnected',
+  loading: null,
   datasets: [],
   logs: [],
   stats: { arms: '--', fps: '--', frames: 0, episodes: 0 },
@@ -97,12 +99,15 @@ export const useDataCollection = create<DataCollectionStore>((set, get) => ({
   clearLog: () => set({ logs: [] }),
 
   doConnect: async () => {
+    set({ loading: 'connect' })
     get().addLog('Connecting robot...')
     try {
       await postJson(`${API}/connect`)
       get().addLog('Robot connected', 'ok')
     } catch (e: unknown) {
       get().addLog(`Connect failed: ${(e as Error).message}`, 'err')
+    } finally {
+      set({ loading: null })
     }
   },
 
@@ -117,12 +122,15 @@ export const useDataCollection = create<DataCollectionStore>((set, get) => ({
   },
 
   doTeleopStart: async () => {
+    set({ loading: 'teleop' })
     get().addLog('Starting teleoperation...')
     try {
       await postJson(`${API}/teleop/start`)
-      get().addLog('Teleoperation started', 'ok')
+      get().addLog('Teleoperation started — hardware initializing...', 'ok')
     } catch (e: unknown) {
       get().addLog(`Teleop start failed: ${(e as Error).message}`, 'err')
+    } finally {
+      set({ loading: null })
     }
   },
 
@@ -137,14 +145,17 @@ export const useDataCollection = create<DataCollectionStore>((set, get) => ({
   },
 
   doRecordStart: async (params) => {
+    set({ loading: 'record' })
     get().addLog(
       `Starting recording: ${params.dataset_name} (${params.num_episodes} episodes @ ${params.fps} fps)`,
     )
     try {
       await postJson(`${API}/record/start`, params)
-      get().addLog('Recording started', 'ok')
+      get().addLog('Recording started — hardware initializing...', 'ok')
     } catch (e: unknown) {
       get().addLog(`Record start failed: ${(e as Error).message}`, 'err')
+    } finally {
+      set({ loading: null })
     }
   },
 

@@ -84,6 +84,10 @@ const translations = {
     enablePreview: '开启预览',
     disablePreview: '关闭预览',
     camerasDisabled: '摄像头预览已关闭',
+    connecting: '连接中...',
+    startingTeleop: '启动遥操作中...',
+    startingRecord: '启动录制中...',
+    hwInitializing: '硬件初始化中，请稍候',
   },
   en: {
     // Header
@@ -166,6 +170,10 @@ const translations = {
     enablePreview: 'Enable Preview',
     disablePreview: 'Disable Preview',
     camerasDisabled: 'Camera preview disabled',
+    connecting: 'Connecting...',
+    startingTeleop: 'Starting teleop...',
+    startingRecord: 'Starting recording...',
+    hwInitializing: 'Initializing hardware, please wait',
   },
 } as const
 

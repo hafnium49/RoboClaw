@@ -103,7 +103,7 @@ function canDo(state: RobotState) {
 // ── Main View ─────────────────────────────────────────────────
 export default function DashboardView() {
   const store = useDataCollection()
-  const { state, stats, episodeNum, logs, datasets } = store
+  const { state, stats, episodeNum, logs, datasets, loading } = store
   const { hardwareStatus: hwStatus, fetchHardwareStatus } = useDashboard()
   const ok = canDo(state)
   const logRef = useRef<HTMLDivElement>(null)
@@ -204,10 +204,10 @@ export default function DashboardView() {
                 <div className="text-sm text-tx2 mb-3">{t('noArms')}</div>
               )}
               <div className="flex gap-2 flex-wrap">
-                <Btn variant="gn" disabled={!ok.connect} onClick={store.doConnect}>
-                  {t('connect')}
+                <Btn variant="gn" disabled={!ok.connect || loading === 'connect'} onClick={store.doConnect}>
+                  {loading === 'connect' ? t('connecting') : t('connect')}
                 </Btn>
-                <Btn variant="rd" disabled={!ok.disconnect} onClick={store.doDisconnect}>
+                <Btn variant="rd" disabled={!ok.disconnect || !!loading} onClick={store.doDisconnect}>
                   {t('disconnect')}
                 </Btn>
               </div>
@@ -245,13 +245,19 @@ export default function DashboardView() {
             <div className="bg-sf border border-bd rounded-lg p-4">
               <h3 className="text-xs text-tx2 uppercase tracking-wider mb-2 font-medium">{t('teleoperation')}</h3>
               <div className="flex gap-2 flex-wrap">
-                <Btn variant="ac" disabled={!ok.teleopStart} onClick={store.doTeleopStart}>
-                  {t('startTeleop')}
+                <Btn variant="ac" disabled={!ok.teleopStart || !!loading} onClick={store.doTeleopStart}>
+                  {loading === 'teleop' ? t('startingTeleop') : t('startTeleop')}
                 </Btn>
-                <Btn variant="yl" disabled={!ok.teleopStop} onClick={store.doTeleopStop}>
+                <Btn variant="yl" disabled={!ok.teleopStop || !!loading} onClick={store.doTeleopStop}>
                   {t('stopTeleop')}
                 </Btn>
               </div>
+              {(loading === 'teleop' || state === 'teleoperating') && (
+                <div className="mt-2 flex items-center gap-2 text-sm text-ac">
+                  <span className="inline-block w-2 h-2 rounded-full bg-ac animate-pulse" />
+                  {loading === 'teleop' ? t('hwInitializing') : t('stateTeleoperating')}
+                </div>
+              )}
             </div>
 
             {/* Recording card (full width) */}
@@ -302,8 +308,8 @@ export default function DashboardView() {
                   />
                 </label>
                 <div className="flex gap-2 flex-1 justify-end">
-                  <Btn variant="gn" disabled={!ok.recStart} onClick={handleRecordStart}>
-                    {t('startRecording')}
+                  <Btn variant="gn" disabled={!ok.recStart || !!loading} onClick={handleRecordStart}>
+                    {loading === 'record' ? t('startingRecord') : t('startRecording')}
                   </Btn>
                   <Btn variant="rd" disabled={!ok.recStop} onClick={store.doRecordStop}>
                     {t('stopRecording')}
