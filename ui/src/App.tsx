@@ -1,7 +1,7 @@
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom'
-import ChatPage from './features/chat/ChatPage'
-import SettingsPage from './features/settings/SettingsPage'
-import Layout from './shared/components/Layout'
+import ChatView from './views/ChatView'
+import SettingsView from './views/SettingsView'
+import Layout from './components/Layout'
 
 function App() {
   return (
@@ -9,8 +9,8 @@ function App() {
       <Routes>
         <Route path="/" element={<Layout />}>
           <Route index element={<Navigate to="/chat" replace />} />
-          <Route path="chat" element={<ChatPage />} />
-          <Route path="settings" element={<SettingsPage />} />
+          <Route path="chat" element={<ChatView />} />
+          <Route path="settings" element={<SettingsView />} />
         </Route>
       </Routes>
     </BrowserRouter>

@@ -1,10 +1,10 @@
 import { useState, useRef, useEffect } from 'react'
 import { Link } from 'react-router-dom'
-import { useWebSocket } from '../../shared/api/websocket'
+import { useWebSocket } from '../controllers/connection'
 import ReactMarkdown from 'react-markdown'
-import { fetchProviderStatus } from '../../shared/api/provider'
+import { fetchProviderStatus } from '../controllers/provider'
 
-export default function ChatPage() {
+export default function ChatView() {
   const [input, setInput] = useState('')
   const [providerConfigured, setProviderConfigured] = useState(true)
   const { messages, sendMessage, connected } = useWebSocket()

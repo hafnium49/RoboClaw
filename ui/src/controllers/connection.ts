@@ -1,14 +1,7 @@
 import { create } from 'zustand'
+import { type MessageRole, type Message, normalizeTimestamp, normalizeHistoryMessage } from './chat'
 
-type MessageRole = 'user' | 'assistant'
-
-interface Message {
-  id: string
-  role: MessageRole
-  content: string
-  timestamp: number
-  metadata?: Record<string, unknown>
-}
+export type { MessageRole, Message }
 
 interface WebSocketStore {
   ws: WebSocket | null
@@ -42,19 +35,6 @@ function persistSessionId(sessionId: string): void {
   window.localStorage.setItem(STORAGE_KEY, sessionId)
 }
 
-function normalizeTimestamp(value: unknown): number {
-  if (typeof value === 'number') {
-    return value
-  }
-  if (typeof value === 'string') {
-    const parsed = Date.parse(value)
-    if (!Number.isNaN(parsed)) {
-      return parsed
-    }
-  }
-  return Date.now()
-}
-
 function resolveWebSocketUrl(sessionId: string): string {
   const override = import.meta.env.VITE_WEBSOCKET_URL as string | undefined
   const url = override
@@ -63,16 +43,6 @@ function resolveWebSocketUrl(sessionId: string): string {
   url.protocol = url.protocol === 'https:' ? 'wss:' : 'ws:'
   url.searchParams.set('chat_id', sessionId)
   return url.toString()
-}
-
-function normalizeHistoryMessage(message: any): Message {
-  return {
-    id: String(message.id ?? `${message.role ?? 'assistant'}-${Math.random()}`),
-    role: message.role === 'user' ? 'user' : 'assistant',
-    content: String(message.content ?? ''),
-    timestamp: normalizeTimestamp(message.timestamp),
-    metadata: message.metadata ?? {},
-  }
 }
 
 export const useWebSocket = create<WebSocketStore>((set, get) => ({
@@ -110,7 +80,7 @@ export const useWebSocket = create<WebSocketStore>((set, get) => ({
         return
       }
 
-      if (data.type === 'session') {
+      if (data.type === 'session.init') {
         const resolvedSessionId = String(data.chat_id || sessionId)
         persistSessionId(resolvedSessionId)
         set({
@@ -120,7 +90,7 @@ export const useWebSocket = create<WebSocketStore>((set, get) => ({
         return
       }
 
-      if (data.type === 'message') {
+      if (data.type === 'chat.message') {
         get().addMessage({
           id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
           role: data.role === 'user' ? 'user' : 'assistant',
@@ -157,7 +127,7 @@ export const useWebSocket = create<WebSocketStore>((set, get) => ({
   },
 
   sendMessage: (content: string) => {
-    const { ws, connected, sessionId } = get()
+    const { ws, connected } = get()
     if (!connected || !ws) {
       console.error('WebSocket not connected')
       return
@@ -173,9 +143,9 @@ export const useWebSocket = create<WebSocketStore>((set, get) => ({
 
     ws.send(
       JSON.stringify({
+        type: 'chat.send',
         content,
         metadata: {},
-        session_id: sessionId,
       }),
     )
   },

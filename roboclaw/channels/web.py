@@ -91,7 +91,7 @@ class WebChannel(BaseChannel):
         await self._send_json(
             websocket,
             {
-                "type": "session",
+                "type": "session.init",
                 "chat_id": chat_id,
                 "history": self._session_history(chat_id),
             },
@@ -104,7 +104,7 @@ class WebChannel(BaseChannel):
         except json.JSONDecodeError:
             await self._send_json(
                 websocket,
-                {"type": "error", "message": "Expected JSON websocket payload."},
+                {"type": "error", "code": "parse_error", "message": "Expected JSON websocket payload."},
             )
         except Exception:
             logger.exception("WebSocket error for {}", user_id)
@@ -116,6 +116,14 @@ class WebChannel(BaseChannel):
     async def _read_loop(self, websocket: WebSocket, chat_id: str, user_id: str) -> None:
         while True:
             payload = json.loads(await websocket.receive_text())
+            msg_type = payload.get("type", "chat.send")
+            if msg_type != "chat.send":
+                await self._send_json(websocket, {
+                    "type": "error",
+                    "code": "unknown_type",
+                    "message": f"Unknown message type: {msg_type}",
+                })
+                continue
             content = str(payload.get("content", "")).strip()
             if not content:
                 continue
@@ -157,7 +165,7 @@ class WebChannel(BaseChannel):
             return
 
         payload = {
-            "type": "message",
+            "type": "chat.message",
             "chat_id": msg.chat_id,
             "role": "assistant",
             "content": msg.content,

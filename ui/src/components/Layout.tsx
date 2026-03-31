@@ -1,6 +1,6 @@
 import { Outlet, Link, useLocation } from 'react-router-dom'
 import { useEffect } from 'react'
-import { useWebSocket } from '../api/websocket'
+import { useWebSocket } from '../controllers/connection'
 
 export default function Layout() {
   const location = useLocation()

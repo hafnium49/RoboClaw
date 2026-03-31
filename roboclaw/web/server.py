@@ -9,6 +9,7 @@ from __future__ import annotations
 import asyncio
 import json
 from contextlib import suppress
+from pathlib import Path
 from typing import Any
 
 import httpx
@@ -416,6 +417,12 @@ def create_app(
     if web_ch is not None:
         web_ch.register_routes(app)
     _register_system_routes(app, agent)
+
+    # 13. Serve built frontend in production (ui/dist/)
+    ui_dist = Path(__file__).resolve().parent.parent.parent / "ui" / "dist"
+    if ui_dist.is_dir():
+        from starlette.staticfiles import StaticFiles
+        app.mount("/", StaticFiles(directory=str(ui_dist), html=True), name="ui")
 
     # Store state for host/port access
     app.state.web_host = web_cfg["host"]

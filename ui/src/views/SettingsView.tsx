@@ -1,10 +1,10 @@
 import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 
-import { fetchProviderStatus, saveProviderConfig } from '../../shared/api/provider'
+import { fetchProviderStatus, saveProviderConfig } from '../controllers/provider'
 
 
-export default function SettingsPage() {
+export default function SettingsView() {
   const navigate = useNavigate()
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
