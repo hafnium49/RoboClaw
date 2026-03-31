@@ -42,6 +42,11 @@ class RobotSession:
     def state(self) -> str:
         return self._state
 
+    @property
+    def cameras_locked(self) -> bool:
+        """True when cameras must not be opened (teleop/record owns the devices)."""
+        return self._state in ("teleoperating", "recording")
+
     def _require_state(self, *allowed: str) -> None:
         if self._state not in allowed:
             raise RuntimeError(f"Requires state {allowed}, current is '{self._state}'")
