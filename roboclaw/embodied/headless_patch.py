@@ -27,6 +27,8 @@ class TTYKeyboardListener:
     def start(self) -> None:
         if self._thread and self._thread.is_alive():
             return
+        if not os.isatty(self._fd):
+            return
         self._old_attrs = termios.tcgetattr(self._fd)
         tty.setcbreak(self._fd)
         self._thread = threading.Thread(target=self._run, name="tty-keyboard-listener", daemon=True)
