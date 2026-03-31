@@ -38,29 +38,29 @@ function Btn({
 // ── Camera preview ────────────────────────────────────────────
 function CameraPreviewPanel({
   cameras,
-  recording,
+  enabled,
   t,
 }: {
   cameras: { alias: string; connected: boolean; width: number; height: number }[]
-  recording: boolean
+  enabled: boolean
   t: (key: any) => string
 }) {
   const [tick, setTick] = useState(0)
 
   useEffect(() => {
-    if (recording) return
+    if (!enabled) return
     const connected = cameras.filter((c) => c.connected)
     if (!connected.length) return
     const timer = setInterval(() => setTick((n) => n + 1), 1500)
     return () => clearInterval(timer)
-  }, [cameras, recording])
+  }, [cameras, enabled])
 
   const connected = cameras.filter((c) => c.connected)
 
-  if (!connected.length) {
+  if (!enabled || !connected.length) {
     return (
-      <div className="bg-sf p-2 min-h-[180px] flex items-center justify-center border-b border-bd">
-        <span className="text-tx2">{t('noCameraFeed')}</span>
+      <div className="bg-sf p-2 min-h-[100px] flex items-center justify-center border-b border-bd">
+        <span className="text-tx2">{!enabled ? t('camerasDisabled') : t('noCameraFeed')}</span>
       </div>
     )
   }
@@ -69,17 +69,11 @@ function CameraPreviewPanel({
     <div className="bg-black/5 p-2 flex flex-wrap gap-2 border-b border-bd">
       {connected.map((cam) => (
         <div key={cam.alias} className="flex-1 min-w-[250px] max-w-[520px] relative bg-sf rounded-lg overflow-hidden border border-bd">
-          {recording ? (
-            <div className="aspect-video flex items-center justify-center text-sm text-tx2">
-              {t('stateRecording')}...
-            </div>
-          ) : (
-            <img
-              src={`/api/dashboard/camera-preview/${cam.alias}?t=${tick}`}
-              alt={cam.alias}
-              className="w-full aspect-video object-contain bg-black"
-            />
-          )}
+          <img
+            src={`/api/dashboard/camera-preview/${cam.alias}?t=${tick}`}
+            alt={cam.alias}
+            className="w-full aspect-video object-contain bg-black"
+          />
           <div className="absolute top-1.5 left-2 bg-black/60 text-white text-2xs px-2 py-0.5 rounded">
             {cam.alias}
           </div>
@@ -128,6 +122,7 @@ export default function DashboardView() {
     recording: 'bg-yl/10 text-yl',
   }
 
+  const [camerasEnabled, setCamerasEnabled] = useState(true)
   const [dsName, setDsName] = useState('')
   const [task, setTask] = useState('')
   const [fps, setFps] = useState(30)
@@ -179,7 +174,7 @@ export default function DashboardView() {
         {/* Left: camera + controls */}
         <div className="flex flex-col overflow-y-auto">
           {/* Camera preview panel */}
-          <CameraPreviewPanel cameras={hwStatus?.cameras || []} recording={state === 'recording'} t={t} />
+          <CameraPreviewPanel cameras={hwStatus?.cameras || []} enabled={camerasEnabled && state !== 'teleoperating' && state !== 'recording'} t={t} />
 
           {/* Control grid */}
           <div className="grid grid-cols-2 gap-3 p-4 max-[900px]:grid-cols-1">
@@ -236,6 +231,14 @@ export default function DashboardView() {
               ) : (
                 <div className="text-sm text-tx2 mb-3">{t('noCameras')}</div>
               )}
+              <div className="flex gap-2 flex-wrap">
+                <Btn variant="gn" disabled={camerasEnabled} onClick={() => setCamerasEnabled(true)}>
+                  {t('enablePreview')}
+                </Btn>
+                <Btn variant="rd" disabled={!camerasEnabled} onClick={() => setCamerasEnabled(false)}>
+                  {t('disablePreview')}
+                </Btn>
+              </div>
             </div>
 
             {/* Teleop card */}

@@ -81,6 +81,9 @@ const translations = {
     noCameras: '未检测到摄像头',
     leader: '主动臂',
     follower: '从动臂',
+    enablePreview: '开启预览',
+    disablePreview: '关闭预览',
+    camerasDisabled: '摄像头预览已关闭',
   },
   en: {
     // Header
@@ -160,6 +163,9 @@ const translations = {
     noCameras: 'No cameras detected',
     leader: 'Leader',
     follower: 'Follower',
+    enablePreview: 'Enable Preview',
+    disablePreview: 'Disable Preview',
+    camerasDisabled: 'Camera preview disabled',
   },
 } as const
 
