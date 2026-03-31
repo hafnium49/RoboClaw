@@ -19,7 +19,6 @@ from roboclaw.agent.subagent import SubagentManager
 from roboclaw.agent.tools.cron import CronTool
 from roboclaw.agent.skills import BUILTIN_SKILLS_DIR
 from roboclaw.agent.tools.filesystem import EditFileTool, ListDirTool, ReadFileTool, WriteFileTool
-from roboclaw.agent.tools.learning_workbench import LearningWorkbenchTool
 from roboclaw.agent.tools.message import MessageTool
 from roboclaw.agent.tools.registry import ToolRegistry
 from roboclaw.agent.tools.shell import ExecTool
@@ -132,7 +131,6 @@ class AgentLoop:
         self.tools.register(WebSearchTool(config=self.web_search_config, proxy=self.web_proxy))
         self.tools.register(WebFetchTool(proxy=self.web_proxy))
         self.tools.register(MessageTool(send_callback=self.bus.publish_outbound))
-        self.tools.register(LearningWorkbenchTool())
         self.tools.register(SpawnTool(manager=self.subagents))
         if self.cron_service:
             self.tools.register(CronTool(self.cron_service))
