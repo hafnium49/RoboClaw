@@ -254,7 +254,7 @@ export default function DashboardView() {
     recording: 'bg-yl/10 text-yl',
   }
 
-  const [camerasEnabled, setCamerasEnabled] = useState(true)
+  const [camerasEnabled, setCamerasEnabled] = useState(false)
 
   // Auto-close camera preview BEFORE teleop/record starts (release device for subprocess)
   useEffect(() => {

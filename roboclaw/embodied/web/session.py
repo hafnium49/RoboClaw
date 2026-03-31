@@ -77,7 +77,7 @@ class RobotSession:
             self._require_state("connected")
             argv = self._build_teleop_argv()
             self._state = "teleoperating"
-            import time; time.sleep(2)
+            import time; time.sleep(3)
             self._launch_subprocess(argv)
             logger.info("Teleoperation started")
 
@@ -103,7 +103,7 @@ class RobotSession:
             argv = self._build_record_argv(dataset_name, task, fps, num_episodes)
             self._recording_dataset = dataset_name
             self._state = "recording"
-            import time; time.sleep(2)
+            import time; time.sleep(3)
             self._launch_subprocess(argv)
             logger.info("Recording started: dataset={}, episodes={}", dataset_name, num_episodes)
 
