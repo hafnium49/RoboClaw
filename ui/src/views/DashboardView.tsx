@@ -287,7 +287,8 @@ export default function DashboardView() {
   }, [logs])
 
   function handleRecordStart() {
-    if (!dsName.trim() || !task.trim()) return
+    if (!dsName.trim()) { store.addLog(t('fillDatasetName'), 'err'); return }
+    if (!task.trim()) { store.addLog(t('fillTaskDesc'), 'err'); return }
     store.doRecordStart({
       dataset_name: dsName.trim(),
       task: task.trim(),
