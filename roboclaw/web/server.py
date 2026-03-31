@@ -157,11 +157,6 @@ def _register_system_routes(app: FastAPI, agent: AgentLoop) -> None:
             },
         }
 
-    @app.get("/api/system/provider-config")
-    async def get_provider_config() -> dict[str, Any]:
-        config = load_config(get_config_path())
-        return _provider_status_payload(config)
-
     @app.post("/api/system/provider-config")
     async def save_provider_config(payload: dict[str, Any] = Body(...)) -> dict[str, Any]:
         return await _handle_save_provider(payload, agent)
@@ -320,8 +315,9 @@ def create_app(
     # 3. Provider (graceful fallback for unconfigured state)
     try:
         provider = build_provider(config)
-    except ProviderConfigurationError:
-        provider = UnconfiguredProvider()
+    except ProviderConfigurationError as exc:
+        logger.warning("Provider not configured at startup: {}. Configure via Settings.", exc)
+        provider = UnconfiguredProvider(str(exc))
 
     # 4. Cron service
     cron_store_path = get_cron_dir() / "jobs.json"
@@ -428,7 +424,7 @@ def create_app(
     app.state.web_host = web_cfg["host"]
     app.state.web_port = web_cfg["port"]
 
-    # 13. Startup: launch all background tasks
+    # 14. Startup: launch all background tasks
     @app.on_event("startup")
     async def _startup() -> None:
         app.state.agent_task = asyncio.create_task(agent.run(), name="roboclaw-agent")
@@ -436,7 +432,7 @@ def create_app(
         app.state.cron_task = asyncio.create_task(cron.start(), name="roboclaw-cron")
         app.state.heartbeat_task = asyncio.create_task(heartbeat.start(), name="roboclaw-heartbeat")
 
-    # 14. Shutdown: tear down gracefully
+    # 15. Shutdown: tear down gracefully
     @app.on_event("shutdown")
     async def _shutdown() -> None:
         agent.stop()

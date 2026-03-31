@@ -6,7 +6,6 @@ import asyncio
 import json
 from collections import defaultdict
 from contextlib import suppress
-from datetime import datetime
 from typing import Any
 from uuid import uuid4
 
@@ -16,6 +15,7 @@ from loguru import logger
 from roboclaw.bus.events import OutboundMessage
 from roboclaw.bus.queue import MessageBus
 from roboclaw.channels.base import BaseChannel
+from roboclaw.utils.helpers import timestamp
 
 
 class WebChannel(BaseChannel):
@@ -169,7 +169,7 @@ class WebChannel(BaseChannel):
             "chat_id": msg.chat_id,
             "role": "assistant",
             "content": msg.content,
-            "timestamp": datetime.now().isoformat(),
+            "timestamp": timestamp(),
             "metadata": msg.metadata or {},
         }
 
@@ -177,7 +177,7 @@ class WebChannel(BaseChannel):
         for websocket in sockets:
             try:
                 await self._send_json(websocket, payload)
-            except Exception as exc:
+            except (ConnectionError, RuntimeError, WebSocketDisconnect) as exc:
                 logger.warning("Failed to send websocket message: {}", exc)
                 disconnected.append(websocket)
 
@@ -203,7 +203,7 @@ class WebChannel(BaseChannel):
 
         for sockets in list(self._connections.values()):
             for websocket in list(sockets):
-                with suppress(Exception):
+                with suppress(ConnectionError, RuntimeError, WebSocketDisconnect):
                     await websocket.close()
         self._connections.clear()
 

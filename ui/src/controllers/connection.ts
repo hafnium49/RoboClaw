@@ -35,6 +35,8 @@ function persistSessionId(sessionId: string): void {
   window.localStorage.setItem(STORAGE_KEY, sessionId)
 }
 
+let reconnectTimer: ReturnType<typeof setTimeout> | null = null
+
 function resolveWebSocketUrl(sessionId: string): string {
   const override = import.meta.env.VITE_WEBSOCKET_URL as string | undefined
   const url = override
@@ -106,7 +108,8 @@ export const useWebSocket = create<WebSocketStore>((set, get) => ({
         return
       }
       set({ connected: false, ws: null })
-      window.setTimeout(() => {
+      reconnectTimer = window.setTimeout(() => {
+        reconnectTimer = null
         if (!get().connected && !get().ws) {
           get().connect()
         }
@@ -119,6 +122,10 @@ export const useWebSocket = create<WebSocketStore>((set, get) => ({
   },
 
   disconnect: () => {
+    if (reconnectTimer) {
+      clearTimeout(reconnectTimer)
+      reconnectTimer = null
+    }
     const { ws } = get()
     set({ ws: null, connected: false })
     if (ws) {

@@ -7,12 +7,7 @@ import os
 from typing import Any
 
 from roboclaw.config.schema import Config
-from roboclaw.providers.azure_openai_provider import AzureOpenAIProvider
 from roboclaw.providers.base import GenerationSettings, LLMProvider, LLMResponse
-from roboclaw.providers.custom_provider import CustomProvider
-from roboclaw.providers.litellm_provider import LiteLLMProvider
-from roboclaw.providers.openai_codex_provider import OpenAICodexProvider
-from roboclaw.providers.registry import find_by_name
 
 
 class ProviderConfigurationError(RuntimeError):
@@ -35,6 +30,7 @@ def build_provider(config: Config) -> LLMProvider:
     provider_config = config.get_provider(model)
 
     if provider_name == "openai_codex" or model.startswith("openai-codex/"):
+        from roboclaw.providers.openai_codex_provider import OpenAICodexProvider
         provider = OpenAICodexProvider(default_model=model)
     elif provider_name == "custom":
         if not provider_config or not provider_config.api_base:
@@ -42,6 +38,7 @@ def build_provider(config: Config) -> LLMProvider:
                 "Custom provider requires api_base.",
                 "Set the global base URL in the Web Settings page or in providers.custom.api_base.",
             )
+        from roboclaw.providers.custom_provider import CustomProvider
         provider = CustomProvider(
             api_key=provider_config.api_key if provider_config else "no-key",
             api_base=provider_config.api_base,
@@ -53,12 +50,14 @@ def build_provider(config: Config) -> LLMProvider:
                 "Azure OpenAI requires api_key and api_base.",
                 "Set them in ~/.roboclaw/config.json under providers.azure_openai section.",
             )
+        from roboclaw.providers.azure_openai_provider import AzureOpenAIProvider
         provider = AzureOpenAIProvider(
             api_key=provider_config.api_key,
             api_base=provider_config.api_base,
             default_model=model,
         )
     else:
+        from roboclaw.providers.registry import find_by_name
         spec = find_by_name(provider_name)
         if (
             not model.startswith("bedrock/")
@@ -69,6 +68,7 @@ def build_provider(config: Config) -> LLMProvider:
                 "No API key configured.",
                 "Set one in ~/.roboclaw/config.json under providers section.",
             )
+        from roboclaw.providers.litellm_provider import LiteLLMProvider
         provider = LiteLLMProvider(
             api_key=provider_config.api_key if provider_config else None,
             api_base=config.get_api_base(model),
@@ -96,9 +96,6 @@ class UnconfiguredProvider(LLMProvider):
         )
 
     async def chat(self, messages: list[dict[str, Any]], **kwargs: Any) -> LLMResponse:
-        return LLMResponse(content=self._message, finish_reason="error")
-
-    async def chat_with_retry(self, messages: list[dict[str, Any]], **kwargs: Any) -> LLMResponse:
         return LLMResponse(content=self._message, finish_reason="error")
 
     def get_default_model(self) -> str:
