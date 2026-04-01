@@ -65,14 +65,16 @@ def read_servo_positions(setup: dict[str, Any] | None = None) -> dict[str, Any]:
             for name, (mid, model) in motor_config.items()
         }
         bus = FeetechMotorsBus(port=port, motors=motors)
-        bus.connect()
-        positions: dict[str, int | None] = {}
-        for name in motor_config:
-            try:
-                positions[name] = int(bus.read("Present_Position", name, normalize=False))
-            except Exception:
-                logger.debug("Failed to read motor '{}' on arm '{}'", name, alias)
-                positions[name] = None
-        bus.disconnect()
-        result["arms"][alias] = positions
+        try:
+            bus.connect()
+            positions: dict[str, int | None] = {}
+            for name in motor_config:
+                try:
+                    positions[name] = int(bus.read("Present_Position", name, normalize=False))
+                except Exception:
+                    logger.debug("Failed to read motor '{}' on arm '{}'", name, alias)
+                    positions[name] = None
+            result["arms"][alias] = positions
+        finally:
+            bus.disconnect()
     return result

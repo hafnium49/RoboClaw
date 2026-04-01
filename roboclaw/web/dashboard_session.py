@@ -103,7 +103,7 @@ class DashboardSession:
             await self._stop_rerun_server()
             raise RuntimeError(str(exc)) from exc
 
-        await self._transition_through_preparing("teleoperating", argv)
+        await self._transition_through_preparing("teleoperating", argv, setup)
 
     async def start_recording(
         self,
@@ -144,7 +144,7 @@ class DashboardSession:
         self._total_frames = 0
         self._episode_phase = ""
 
-        await self._transition_through_preparing("recording", argv)
+        await self._transition_through_preparing("recording", argv, setup)
         return dataset_name
 
     async def stop(self) -> None:
@@ -242,28 +242,31 @@ class DashboardSession:
         if self._state != "idle":
             raise RuntimeError(f"Session busy (state={self._state})")
 
-    async def _transition_through_preparing(self, target_state: str, argv: list[str]) -> None:
+    async def _transition_through_preparing(
+        self, target_state: str, argv: list[str], setup: dict[str, Any],
+    ) -> None:
         self._cancel_prepare.clear()
         self._set_state("preparing")
         # Wait for drain, but allow cancellation via stop()
         try:
             await asyncio.wait_for(self._cancel_prepare.wait(), timeout=_DRAIN_SECONDS)
-            # If we get here, cancel was requested
             self._set_state("idle")
             return
         except asyncio.TimeoutError:
-            pass  # Normal: drain period elapsed without cancellation
-        # Re-check: stop() may have run during sleep
+            pass
         if self._cancel_prepare.is_set():
             self._set_state("idle")
             return
         # Acquire port locks for all arm serial ports before launching subprocess
-        setup = load_setup()
-        arm_ports = [arm["port"] for arm in setup.get("arms", []) if arm.get("port")]
-        for port in sorted(set(arm_ports)):
+        arm_ports = sorted({arm["port"] for arm in setup.get("arms", []) if arm.get("port")})
+        for port in arm_ports:
             await port_locks._get_lock(port).acquire()
-        self._held_port_locks = sorted(set(arm_ports))
-        await self._launch_subprocess(argv)
+        self._held_port_locks = arm_ports
+        try:
+            await self._launch_subprocess(argv)
+        except Exception:
+            self._release_port_locks()
+            raise
         self._set_state(target_state)
 
     async def _launch_subprocess(self, argv: list[str]) -> None:
@@ -290,11 +293,8 @@ class DashboardSession:
             if not line:
                 continue
             logger.info("subprocess: {}", line)
-            prev_status = self.get_status()
-            self._parse_line(line)
-            new_status = self.get_status()
-            if new_status != prev_status:
-                await self._emit_state_change(new_status)
+            if self._parse_line(line):
+                await self._emit_state_change(self.get_status())
 
     async def _wait_for_exit(self, proc: asyncio.subprocess.Process) -> None:
         """Wait for subprocess to exit and clean up session state."""
@@ -312,38 +312,42 @@ class DashboardSession:
         self._episode_phase = ""
         self._set_state("idle")
 
-    def _parse_line(self, line: str) -> None:
-        """Parse LeRobot stdout to track episode lifecycle and frame progress."""
+    def _parse_line(self, line: str) -> bool:
+        """Parse LeRobot stdout to track episode lifecycle. Returns True if state changed."""
         m = _RE_RECORDING_EP.search(line)
         if m:
             if self._episode_phase in ("saving", "resetting"):
                 self._saved_episodes += 1
             self._current_episode = int(m.group(1))
             self._episode_phase = "recording"
-            return
+            return True
 
         if "Right arrow key pressed" in line:
             if self._episode_phase in ("recording", "resetting"):
                 self._episode_phase = "saving"
-            return
+                return True
+            return False
 
         if "Reset the environment" in line:
             self._episode_phase = "resetting"
-            return
+            return True
 
         if "Re-record episode" in line:
             self._episode_phase = "recording"
-            return
+            return True
 
         if "Stop recording" in line:
             if self._episode_phase in ("saving", "resetting"):
                 self._saved_episodes += 1
             self._episode_phase = ""
-            return
+            return True
 
         m = _RE_FRAME_COUNT.search(line)
         if m:
             self._total_frames = int(m.group(1))
+            return False
+
+        return False
 
     async def _send_key(self, key: bytes) -> None:
         if self._process is None or self._process.stdin is None:

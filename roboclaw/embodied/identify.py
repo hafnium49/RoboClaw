@@ -9,7 +9,7 @@ import json
 import os
 import sys
 
-from roboclaw.embodied.scan import restore_stderr, suppress_stderr
+from roboclaw.embodied.scan import port_candidates as _port_candidates, restore_stderr, suppress_stderr
 from roboclaw.embodied.setup import _ARM_TYPES
 
 PRESENT_POS_ADDR = 56
@@ -80,9 +80,6 @@ def _confirm(prompt: str) -> bool:
         if answer in ("n", "no"):
             return False
         print("Please enter Y or n.")
-
-
-from roboclaw.embodied.scan import port_candidates as _port_candidates
 
 
 def probe_port(port_path: str, baudrate: int = DEFAULT_BAUDRATE) -> list[int]:

@@ -63,8 +63,8 @@ def register_setup_routes(app: FastAPI) -> None:
     app.state.setup_wizard = wizard
 
     def _require_not_busy() -> None:
-        recording = getattr(app.state, "active_recording", None)
-        if recording is not None and recording.active:
+        session = getattr(app.state, "dashboard_session", None)
+        if session is not None and session.busy:
             raise HTTPException(409, "Session busy — stop teleop/recording first")
 
     @app.post("/api/dashboard/setup/scan")

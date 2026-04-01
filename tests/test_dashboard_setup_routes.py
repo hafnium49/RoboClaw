@@ -28,15 +28,12 @@ _MOCK_CAMERAS = [
 ]
 
 
-def _make_app(recording_active: bool = False) -> FastAPI:
+def _make_app(session_busy: bool = False) -> FastAPI:
     """Create a minimal FastAPI app with setup routes registered."""
     app = FastAPI()
-    if recording_active:
-        rec = MagicMock()
-        rec.active = True
-        app.state.active_recording = rec
-    else:
-        app.state.active_recording = None
+    session = MagicMock()
+    session.busy = session_busy
+    app.state.dashboard_session = session
     register_setup_routes(app)
     return app
 
@@ -208,7 +205,7 @@ def test_current_setup() -> None:
 
 
 def test_scan_returns_409_when_recording() -> None:
-    app = _make_app(recording_active=True)
+    app = _make_app(session_busy=True)
     client = TestClient(app)
     resp = client.post("/api/dashboard/setup/scan")
     assert resp.status_code == 409
