@@ -323,11 +323,11 @@ class SO101Controller:
     ) -> list[str]:
         if not display_data:
             return []
-        args = ["--display.data=true"]
+        args = ["--display_data=true"]
         if display_ip:
-            args.append(f"--display.ip={display_ip}")
+            args.append(f"--display_ip={display_ip}")
         if display_port:
-            args.append(f"--display.port={display_port}")
+            args.append(f"--display_port={display_port}")
         return args
 
     def _bimanual_arm_args(
