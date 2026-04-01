@@ -244,9 +244,21 @@ export default function DashboardView() {
         )}
       </div>
 
+      {/* Rerun visualization */}
+      {session.rerun_web_port > 0 && (state === 'teleoperating' || state === 'recording') && (
+        <div className="border-b border-bd bg-black/5">
+          <iframe
+            src={`${location.protocol}//${location.hostname}:${session.rerun_web_port}`}
+            className="w-full border-0"
+            style={{ height: '400px' }}
+            title="Rerun Visualization"
+          />
+        </div>
+      )}
+
       {/* Main layout */}
       <div className="flex-1 grid grid-cols-[1fr_320px] overflow-hidden max-[900px]:grid-cols-1">
-        {/* Left: camera + controls */}
+        {/* Left: controls */}
         <div className="flex flex-col overflow-y-auto">
           {/* Control grid */}
           <div className="grid grid-cols-2 gap-3 p-4 max-[900px]:grid-cols-1">

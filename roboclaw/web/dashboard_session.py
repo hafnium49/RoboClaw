@@ -36,6 +36,9 @@ _RE_FRAME_COUNT = re.compile(r"frame[s]?\s*[:=]\s*(\d+)", re.IGNORECASE)
 # 5 seconds is empirically sufficient for V4L2/ttyUSB release on Linux.
 _DRAIN_SECONDS = 5
 _GRACEFUL_STOP_TIMEOUT = 15
+_RERUN_GRPC_PORT = 9876
+_RERUN_WEB_PORT = 9090
+_RERUN_BIND = "0.0.0.0"
 
 StatusCallback = Callable[[dict[str, Any]], Awaitable[None] | None]
 
@@ -52,6 +55,9 @@ class DashboardSession:
         self._cancel_prepare = asyncio.Event()
         self._temp_dirs: list[str] = []
         self._held_port_locks: list[str] = []
+        self._rerun_process: asyncio.subprocess.Process | None = None
+        self._rerun_grpc_port = 0
+        self._rerun_web_port = 0
 
         # Recording metadata
         self._dataset_name = ""
@@ -84,20 +90,19 @@ class DashboardSession:
             "total_frames": self._total_frames,
             "elapsed_seconds": round(elapsed, 1),
             "dataset": self._dataset_name if self._state == "recording" else None,
+            "rerun_web_port": self._rerun_web_port if self._rerun_process else 0,
         }
 
     # -- Lifecycle ---------------------------------------------------------
 
-    async def start_teleop(
-        self, *, display_data: bool = False, display_ip: str = "", display_port: int = 0,
-    ) -> None:
+    async def start_teleop(self) -> None:
         self._require_idle_or_raise()
         setup = load_setup()
+        await self._start_rerun_server()
         try:
-            argv, temp_dirs = prepare_teleop(
-                setup, display_data=display_data, display_ip=display_ip, display_port=display_port,
-            )
+            argv, temp_dirs = prepare_teleop(setup, **self._rerun_display_kwargs())
         except ActionError as exc:
+            await self._stop_rerun_server()
             raise RuntimeError(str(exc)) from exc
 
         self._temp_dirs = temp_dirs
@@ -110,10 +115,6 @@ class DashboardSession:
         fps: int = 30,
         episode_time_s: int = 300,
         reset_time_s: int = 10,
-        *,
-        display_data: bool = False,
-        display_ip: str = "",
-        display_port: int = 0,
     ) -> str:
         """Start recording. Returns the generated dataset_name."""
         if self._state == "teleoperating":
@@ -122,6 +123,7 @@ class DashboardSession:
         self._require_idle_or_raise()
 
         setup = load_setup()
+        await self._start_rerun_server()
         kwargs: dict[str, Any] = {
             "task": task,
             "num_episodes": num_episodes,
@@ -131,10 +133,10 @@ class DashboardSession:
         }
         try:
             argv, dataset_name, dataset_root, temp_dirs = prepare_record(
-                setup, kwargs,
-                display_data=display_data, display_ip=display_ip, display_port=display_port,
+                setup, kwargs, **self._rerun_display_kwargs(),
             )
         except ActionError as exc:
+            await self._stop_rerun_server()
             raise RuntimeError(str(exc)) from exc
 
         self._dataset_name = dataset_name
@@ -180,6 +182,65 @@ class DashboardSession:
         logger.info("Sent skip-reset signal (right arrow)")
 
     # -- Internal ----------------------------------------------------------
+
+    def _rerun_display_kwargs(self) -> dict[str, Any]:
+        """Build display kwargs for SO101Controller methods."""
+        ok = self._rerun_process is not None
+        return {
+            "display_data": ok,
+            "display_ip": _RERUN_BIND,
+            "display_port": self._rerun_grpc_port if ok else 0,
+        }
+
+    async def _start_rerun_server(self) -> bool:
+        """Start a Rerun server for web visualization. Returns True on success."""
+        if self._rerun_process is not None:
+            return True
+        try:
+            proc = await asyncio.create_subprocess_exec(
+                "rerun", "--serve-web",
+                "--port", str(_RERUN_GRPC_PORT),
+                "--web-viewer-port", str(_RERUN_WEB_PORT),
+                "--bind", _RERUN_BIND,
+                stdout=asyncio.subprocess.DEVNULL,
+                stderr=asyncio.subprocess.PIPE,
+            )
+            # Poll until process exits or port is ready (max 2s)
+            for _ in range(40):
+                if proc.returncode is not None:
+                    stderr = await proc.stderr.read() if proc.stderr else b""
+                    logger.warning("Rerun server exited (code={}): {}", proc.returncode, stderr.decode(errors="replace")[:200])
+                    return False
+                await asyncio.sleep(0.05)
+            self._rerun_process = proc
+            self._rerun_grpc_port = _RERUN_GRPC_PORT
+            self._rerun_web_port = _RERUN_WEB_PORT
+            logger.info("Rerun server started (gRPC={}, web={})", _RERUN_GRPC_PORT, _RERUN_WEB_PORT)
+            return True
+        except FileNotFoundError:
+            logger.warning("Rerun CLI not found — visualization disabled")
+            return False
+        except OSError as exc:
+            logger.warning("Failed to start Rerun server: {}", exc)
+            return False
+
+    async def _stop_rerun_server(self) -> None:
+        proc = self._rerun_process
+        if proc is None:
+            return
+        self._rerun_process = None
+        self._rerun_grpc_port = 0
+        self._rerun_web_port = 0
+        try:
+            proc.terminate()
+            await asyncio.wait_for(proc.wait(), timeout=5)
+        except (asyncio.TimeoutError, ProcessLookupError):
+            try:
+                proc.kill()
+                await proc.wait()
+            except (ProcessLookupError, PermissionError):
+                pass
+        logger.info("Rerun server stopped")
 
     def _require_idle_or_raise(self) -> None:
         if self._state != "idle":
@@ -253,6 +314,7 @@ class DashboardSession:
         self._close_stdin()
         self._process = None
         self._release_port_locks()
+        await self._stop_rerun_server()
         self._cleanup_temp_dirs()
         self._episode_phase = ""
         self._set_state("idle")
@@ -323,6 +385,7 @@ class DashboardSession:
         self._close_stdin()
         self._process = None
         self._release_port_locks()
+        await self._stop_rerun_server()
         self._cleanup_temp_dirs()
 
     async def _kill_subprocess(self) -> None:
@@ -337,6 +400,7 @@ class DashboardSession:
         await self._await_stdout_task()
         self._process = None
         self._release_port_locks()
+        await self._stop_rerun_server()
         self._cleanup_temp_dirs()
 
     async def _await_stdout_task(self) -> None:

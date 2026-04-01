@@ -1,7 +1,5 @@
 """Tests for arm identification flow."""
 
-import importlib
-
 from unittest.mock import AsyncMock, patch
 
 import pytest
@@ -115,8 +113,8 @@ def test_detect_motion_missing_ids() -> None:
 
 
 def test_port_candidates_adds_cu_variant_on_macos() -> None:
-    identify = importlib.import_module("roboclaw.embodied.identify")
-    with patch.object(identify.sys, "platform", "darwin"):
+    import roboclaw.embodied.scan as scan_module
+    with patch.object(scan_module.sys, "platform", "darwin"):
         assert _port_candidates("/dev/tty.usbmodem123") == [
             "/dev/tty.usbmodem123",
             "/dev/cu.usbmodem123",

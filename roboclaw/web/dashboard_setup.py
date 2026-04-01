@@ -211,13 +211,13 @@ def _try_fix_serial_permissions() -> bool:
 
 def _try_chmod_devices() -> bool:
     """Fallback: chmod individual device files."""
-    import glob
     import os
     import subprocess
 
     from loguru import logger
 
-    devices = glob.glob("/dev/ttyACM*") + glob.glob("/dev/ttyUSB*")
+    from roboclaw.embodied.scan import list_serial_device_paths
+    devices = list_serial_device_paths()
     if not devices:
         return False
     for dev in devices:

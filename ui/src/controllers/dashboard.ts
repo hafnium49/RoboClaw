@@ -39,6 +39,7 @@ export interface SessionStatus {
   total_frames: number
   elapsed_seconds: number
   dataset: string | null
+  rerun_web_port: number
 }
 
 export interface Fault {
@@ -74,7 +75,6 @@ export interface StartRecordingParams {
   fps?: number
   episode_time_s: number
   reset_time_s: number
-  display_port?: number
 }
 
 interface LogEntry {
@@ -99,7 +99,7 @@ interface DashboardStore {
   loading: string | null
 
   // Session actions
-  doTeleopStart: (displayPort?: number) => Promise<void>
+  doTeleopStart: () => Promise<void>
   doTeleopStop: () => Promise<void>
   doRecordStart: (params: StartRecordingParams) => Promise<void>
   doRecordStop: () => Promise<void>
@@ -167,6 +167,7 @@ const defaultSession: SessionStatus = {
   total_frames: 0,
   elapsed_seconds: 0,
   dataset: null,
+  rerun_web_port: 0,
 }
 
 // ---------------------------------------------------------------------------
@@ -199,11 +200,11 @@ export const useDashboard = create<DashboardStore>((set, get) => ({
     } catch { /* ignore */ }
   },
 
-  doTeleopStart: async (displayPort) => {
+  doTeleopStart: async () => {
     set({ loading: 'teleop' })
     get().addLog('Starting teleoperation...')
     try {
-      await postJson(`${API}/session/teleop/start`, { display_port: displayPort || 0 })
+      await postJson(`${API}/session/teleop/start`)
       get().addLog('Teleoperation started', 'ok')
     } catch (e: unknown) {
       get().addLog(`Teleop start failed: ${(e as Error).message}`, 'err')
@@ -372,6 +373,7 @@ export const useDashboard = create<DashboardStore>((set, get) => ({
           total_frames: event.total_frames ?? 0,
           elapsed_seconds: event.elapsed_seconds ?? 0,
           dataset: event.dataset || null,
+          rerun_web_port: event.rerun_web_port || 0,
         },
       })
       return

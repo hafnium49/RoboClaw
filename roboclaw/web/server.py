@@ -512,13 +512,13 @@ def create_app(
 
 def _check_device_permissions() -> None:
     """Check serial/camera device permissions at startup, auto-fix if possible."""
-    import glob
     import os
     import sys
 
     if sys.platform != "linux":
         return
-    devices = glob.glob("/dev/ttyACM*") + glob.glob("/dev/ttyUSB*")
+    from roboclaw.embodied.scan import list_serial_device_paths
+    devices = list_serial_device_paths()
     if not devices:
         return
     denied = [d for d in devices if not os.access(d, os.R_OK | os.W_OK)]

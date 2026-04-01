@@ -31,12 +31,10 @@ class RecordStartRequest(BaseModel):
     fps: int = 30
     episode_time_s: int = 300
     reset_time_s: int = 10
-    display_port: int = 0
 
 
 class TeleopStartRequest(BaseModel):
     fps: int = 30
-    display_port: int = 0
 
 
 class RecheckRequest(BaseModel):
@@ -186,8 +184,7 @@ def register_dashboard_routes(
 
     @app.post("/api/dashboard/session/teleop/start")
     async def teleop_start(body: TeleopStartRequest | None = None) -> dict[str, str]:
-        dp = body.display_port if body else 0
-        await session.start_teleop(display_data=bool(dp), display_port=dp)
+        await session.start_teleop()
         return {"status": "teleoperating"}
 
     @app.post("/api/dashboard/session/teleop/stop")
@@ -203,8 +200,6 @@ def register_dashboard_routes(
             fps=body.fps,
             episode_time_s=body.episode_time_s,
             reset_time_s=body.reset_time_s,
-            display_data=bool(body.display_port),
-            display_port=body.display_port,
         )
         app.state.hardware_monitor.set_recording_active(True)
         return {"status": "recording", "dataset_name": dataset_name}

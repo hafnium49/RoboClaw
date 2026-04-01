@@ -5,6 +5,7 @@ from __future__ import annotations
 import glob
 import os
 import re
+import sys
 from pathlib import Path
 
 
@@ -70,6 +71,38 @@ def scan_serial_ports() -> list[dict[str, str]]:
             "dev": dev,
         })
     return ports
+
+
+def list_serial_device_paths() -> list[str]:
+    """Return USB serial device paths (ttyACM*, ttyUSB*, cu.usb* etc).
+
+    Scoped to actual hardware serial ports only — NOT virtual consoles,
+    pseudo-terminals, or other /dev/tty* entries. Used by permission
+    checks and udev rule installation.
+    """
+    from roboclaw.embodied.stub import is_stub_mode
+
+    if is_stub_mode():
+        return []
+    if sys.platform == "darwin":
+        return sorted(glob.glob("/dev/tty.usb*") + glob.glob("/dev/cu.usb*"))
+    return sorted(glob.glob("/dev/ttyACM*") + glob.glob("/dev/ttyUSB*"))
+
+
+def port_candidates(port_path: str) -> list[str]:
+    """Return candidate device paths to try for a scanned port.
+
+    On macOS, the callable endpoint for serial traffic is often `/dev/cu.*`
+    while scan discovers `/dev/tty.*`. Try both.
+    """
+    candidates = [port_path]
+    if sys.platform == "darwin":
+        name = os.path.basename(port_path)
+        if name.startswith("tty."):
+            candidates.append(port_path.replace("/dev/tty.", "/dev/cu.", 1))
+        elif name.startswith("cu."):
+            candidates.append(port_path.replace("/dev/cu.", "/dev/tty.", 1))
+    return candidates
 
 
 def suppress_stderr() -> int:

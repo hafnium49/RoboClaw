@@ -82,23 +82,7 @@ def _confirm(prompt: str) -> bool:
         print("Please enter Y or n.")
 
 
-def _port_candidates(port_path: str) -> list[str]:
-    """Return candidate device paths to try for a scanned port.
-
-    We keep RoboClaw's scan scope aligned with `lerobot-find-port`, which on
-    Unix includes `/dev/tty*`. On macOS, however, the callable endpoint for
-    serial traffic is often the matching `/dev/cu.*`. Try both, without
-    changing the user-visible scanned range.
-    """
-    candidates = [port_path]
-    if sys.platform == "darwin":
-        name = os.path.basename(port_path)
-        if name.startswith("tty."):
-            candidates.append(port_path.replace("/dev/tty.", "/dev/cu.", 1))
-        elif name.startswith("cu."):
-            candidates.append(port_path.replace("/dev/cu.", "/dev/tty.", 1))
-    seen: set[str] = set()
-    return [path for path in candidates if path and not (path in seen or seen.add(path))]
+from roboclaw.embodied.scan import port_candidates as _port_candidates
 
 
 def probe_port(port_path: str, baudrate: int = DEFAULT_BAUDRATE) -> list[int]:
