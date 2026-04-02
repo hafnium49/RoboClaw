@@ -1,151 +1,46 @@
-"""Dashboard calibration API routes.
-
-Exposes the shared CalibrationSession via HTTP endpoints so the
-dashboard frontend can drive calibration step-by-step.
-"""
+"""Dashboard calibration API routes — thin HTTP shell over EmbodiedService."""
 
 from __future__ import annotations
 
-import asyncio
 from typing import Any
 
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
-
-from roboclaw.embodied.engine import CalibrationSession
-from roboclaw.embodied.port_lock import port_locks
-from roboclaw.embodied.setup import load_setup, mark_arm_calibrated
 
 
 class StartCalibrationRequest(BaseModel):
     arm_alias: str
 
 
-class _CalibrationState:
-    """Holds the active calibration session for the dashboard."""
-
-    def __init__(self) -> None:
-        self.session: CalibrationSession | None = None
-        self.arm_alias: str = ""
-        self._lock_handle: Any = None
-        self._port_cm: Any = None
-
-    @property
-    def active(self) -> bool:
-        return self.session is not None
-
-
-_state = _CalibrationState()
-
-
-def register_calibrate_routes(app: FastAPI) -> None:
+def register_calibrate_routes(app: FastAPI, service: Any) -> None:
     """Register /api/dashboard/calibrate/* routes on the given app."""
 
     API = "/api/dashboard/calibrate"
 
     @app.post(f"{API}/start")
     async def calibrate_start(body: StartCalibrationRequest) -> dict:
-        if _state.active:
-            raise HTTPException(409, "Calibration already in progress.")
-
-        svc = getattr(app.state, "embodied_service", None)
-        if svc:
-            try:
-                svc.acquire_hardware("calibrating")
-            except RuntimeError as exc:
-                raise HTTPException(409, str(exc)) from exc
-
-        setup = load_setup()
-        arm = _find_arm(setup, body.arm_alias)
-
-        # Acquire port lock — store the CM so we can __aexit__ the same one
-        port = arm.get("port", "")
-        if port:
-            _state._port_cm = port_locks.acquire(port)
-            _state._lock_handle = await _state._port_cm.__aenter__()
-
-        session = CalibrationSession(arm)
         try:
-            await asyncio.to_thread(session.connect)
-        except Exception:
-            if _state._port_cm:
-                await _state._port_cm.__aexit__(None, None, None)
-                _state._lock_handle = None
-                _state._port_cm = None
-            if svc:
-                svc.release_hardware()
-            raise
-
-        _state.session = session
-        _state.arm_alias = body.arm_alias
-        return {"state": session.state, "arm_alias": body.arm_alias}
+            return await service.start_calibration(body.arm_alias)
+        except RuntimeError as exc:
+            raise HTTPException(409, str(exc)) from exc
 
     @app.get(f"{API}/status")
     async def calibrate_status() -> dict:
-        if not _state.active:
-            return {"state": "idle", "arm_alias": ""}
-        return {"state": _state.session.state, "arm_alias": _state.arm_alias}
+        return service.get_calibration_status()
 
     @app.post(f"{API}/set-homing")
     async def calibrate_set_homing() -> dict:
-        _require_session()
-        offsets = await asyncio.to_thread(_state.session.set_homing)
-        return {"state": _state.session.state, "homing_offsets": offsets}
+        return await service.set_calibration_homing()
 
     @app.get(f"{API}/positions")
     async def calibrate_positions() -> dict:
-        _require_session()
-        if _state.session.state != "recording":
-            raise HTTPException(400, f"Not recording (state={_state.session.state}).")
-        snapshot = await asyncio.to_thread(_state.session.read_range_positions)
-        return {
-            "positions": snapshot.positions,
-            "mins": snapshot.mins,
-            "maxes": snapshot.maxes,
-        }
+        return await service.read_calibration_positions()
 
     @app.post(f"{API}/finish")
     async def calibrate_finish() -> dict:
-        _require_session()
-        calibration = await asyncio.to_thread(_state.session.finish)
-        mark_arm_calibrated(_state.arm_alias)
-        await _cleanup()
-        svc = getattr(app.state, "embodied_service", None)
-        if svc:
-            svc.release_hardware()
-        return {"state": "done", "calibration": calibration}
+        return await service.finish_calibration()
 
     @app.post(f"{API}/cancel")
     async def calibrate_cancel() -> dict:
-        if _state.active:
-            await asyncio.to_thread(_state.session.cancel)
-            await _cleanup()
-        svc = getattr(app.state, "embodied_service", None)
-        if svc:
-            svc.release_hardware()
+        await service.cancel_calibration()
         return {"state": "idle"}
-
-
-def _find_arm(setup: dict, alias: str) -> dict:
-    """Find arm config by alias."""
-    for arm in setup.get("arms", []):
-        if arm.get("alias") == alias:
-            return arm
-    raise HTTPException(404, f"Arm '{alias}' not found in setup.")
-
-
-def _require_session() -> None:
-    if not _state.active:
-        raise HTTPException(400, "No calibration session active.")
-
-
-async def _cleanup() -> None:
-    """Release port lock and clear session."""
-    if _state._port_cm:
-        await _state._port_cm.__aexit__(None, None, None)
-    _state._lock_handle = None
-    _state._port_cm = None
-    if _state.session:
-        await asyncio.to_thread(_state.session.disconnect)
-    _state.session = None
-    _state.arm_alias = ""

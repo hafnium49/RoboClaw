@@ -30,13 +30,25 @@ _MOCK_CAMERAS = [
 
 def _make_app(session_busy: bool = False) -> FastAPI:
     """Create a minimal FastAPI app with setup routes registered."""
+    from roboclaw.embodied.engine import HardwareScanner
+
     app = FastAPI()
     svc = MagicMock()
     svc.busy = session_busy
     if session_busy:
         svc.acquire_hardware.side_effect = RuntimeError("Hardware busy: recording")
+
+    # Wire scanner methods through to a real HardwareScanner for state-dependent tests
+    scanner = HardwareScanner()
+    svc.scan_ports = scanner.scan_ports
+    svc.scan_cameras = scanner.scan_cameras_list
+    svc.start_motion_detection = scanner.start_motion_detection
+    svc.poll_motion = scanner.poll_motion
+    svc.stop_motion_detection = scanner.stop_motion_detection
+    svc.capture_camera_previews = scanner.capture_camera_previews
     app.state.embodied_service = svc
-    register_setup_routes(app)
+    app.state.setup_wizard = scanner
+    register_setup_routes(app, svc)
     return app
 
 

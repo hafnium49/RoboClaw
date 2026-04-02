@@ -151,10 +151,7 @@ def register_dashboard_routes(
 
     @app.get("/api/dashboard/servo-positions")
     async def servo_positions() -> dict[str, Any]:
-        if service.busy:
-            return {"error": "busy", "arms": {}}
-        from roboclaw.embodied.motors import read_servo_positions
-        return await asyncio.to_thread(read_servo_positions)
+        return await asyncio.to_thread(service.read_servo_positions)
 
     # -- Troubleshooting ---------------------------------------------------
 
@@ -185,9 +182,9 @@ def register_dashboard_routes(
     # -- Setup wizard routes -----------------------------------------------
 
     from roboclaw.web.dashboard_setup import register_setup_routes
-    register_setup_routes(app)
+    register_setup_routes(app, service)
 
     # -- Calibration routes ------------------------------------------------
 
     from roboclaw.web.dashboard_calibrate import register_calibrate_routes
-    register_calibrate_routes(app)
+    register_calibrate_routes(app, service)
