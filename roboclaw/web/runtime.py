@@ -174,6 +174,12 @@ class WebRuntime:
     # Callbacks
     # ------------------------------------------------------------------
 
+    def swap_provider(self, new_provider: Any, config: Any) -> None:
+        """Atomically swap provider and refresh agent defaults."""
+        self.provider = new_provider
+        self.agent.provider = new_provider
+        self._refresh_agent_defaults(config)
+
     def _refresh_agent_defaults(self, config: Any) -> None:
         self.agent.model = config.agents.defaults.model
         self.agent.provider.generation = GenerationSettings(

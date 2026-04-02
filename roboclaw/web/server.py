@@ -8,7 +8,10 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from roboclaw.web.runtime import WebRuntime
 
 import httpx
 from fastapi import Body, FastAPI
@@ -118,7 +121,7 @@ async def _discover_custom_model(api_base: str, api_key: str | None) -> str | No
 # ------------------------------------------------------------------
 
 
-def _register_system_routes(app: FastAPI, runtime: Any) -> None:
+def _register_system_routes(app: FastAPI, runtime: WebRuntime) -> None:
     @app.get("/api/system/provider-status")
     async def provider_status() -> dict[str, Any]:
         config = load_config(get_config_path())
@@ -140,7 +143,7 @@ def _register_system_routes(app: FastAPI, runtime: Any) -> None:
         return await _handle_save_provider(payload, runtime)
 
 
-async def _handle_save_provider(payload: dict[str, Any], runtime: Any) -> dict[str, Any]:
+async def _handle_save_provider(payload: dict[str, Any], runtime: WebRuntime) -> dict[str, Any]:
     """Apply provider config changes, swap provider atomically, refresh agent."""
     config = load_config(get_config_path())
     section = config.providers.custom
@@ -169,8 +172,7 @@ async def _handle_save_provider(payload: dict[str, Any], runtime: Any) -> dict[s
 
     # Atomic provider swap
     new_provider = build_provider(config)
-    runtime.agent.provider = new_provider
-    runtime._refresh_agent_defaults(config)
+    runtime.swap_provider(new_provider, config)
 
     return {"status": "ok", **_provider_status_payload(config)}
 
