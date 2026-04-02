@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import re
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -152,6 +153,47 @@ def _logs_dir() -> Path:
 # ---------------------------------------------------------------------------
 
 
+@dataclass
+class _PreparedContext:
+    controller: "ArmCommandBuilder"  # noqa: F821
+    followers: list[dict[str, Any]]
+    leaders: list[dict[str, Any]]
+    cameras: dict[str, Any]
+    display_kwargs: dict[str, Any]
+
+
+def _prepare_common(
+    setup: dict[str, Any],
+    kwargs: dict[str, Any] | None = None,
+    *,
+    display_data: bool = False,
+    display_ip: str = "",
+    display_port: int = 0,
+    skip_cameras: bool = False,
+) -> _PreparedContext:
+    """Shared preparation for teleop/record: resolve arms, cameras, display."""
+    from roboclaw.embodied.embodiment.arm.command_builder import ArmCommandBuilder
+    from roboclaw.embodied.embodiment.arm.registry import get_family
+    from roboclaw.embodied.sensor.camera import resolve_cameras
+
+    kwargs = kwargs or {}
+    grouped = group_arms(_resolve_action_arms(setup, kwargs))
+    error = _validate_pairing(grouped["followers"], grouped["leaders"])
+    if error:
+        raise ActionError(error)
+    all_arms = grouped["followers"] + grouped["leaders"]
+    family = get_family(all_arms[0]["type"]) if all_arms else None
+    controller = ArmCommandBuilder(family=family)
+    cameras = {} if skip_cameras else resolve_cameras(setup)
+    return _PreparedContext(
+        controller=controller,
+        followers=grouped["followers"],
+        leaders=grouped["leaders"],
+        cameras=cameras,
+        display_kwargs=_display_kwargs(display_data, display_ip, display_port),
+    )
+
+
 def prepare_teleop(
     setup: dict[str, Any],
     kwargs: dict[str, Any] | None = None,
@@ -164,51 +206,38 @@ def prepare_teleop(
 
     Raises ActionError on validation failure.
     """
-    from roboclaw.embodied.embodiment.arm.command_builder import ArmCommandBuilder
-    from roboclaw.embodied.embodiment.arm.registry import get_family
-    from roboclaw.embodied.sensor.camera import resolve_cameras
+    ctx = _prepare_common(
+        setup, kwargs,
+        display_data=display_data, display_ip=display_ip, display_port=display_port,
+    )
 
-    kwargs = kwargs or {}
-    grouped = group_arms(_resolve_action_arms(setup, kwargs))
-    error = _validate_pairing(grouped["followers"], grouped["leaders"])
-    if error:
-        raise ActionError(error)
-
-    all_arms = grouped["followers"] + grouped["leaders"]
-    family = get_family(all_arms[0]["type"]) if all_arms else None
-    controller = ArmCommandBuilder(family=family)
-    followers = grouped["followers"]
-    leaders = grouped["leaders"]
-    cameras = resolve_cameras(setup)
-    display_kwargs = _display_kwargs(display_data, display_ip, display_port)
-
-    if len(followers) == 1:
-        return controller.teleoperate(
-            robot_type=followers[0]["type"],
-            robot_port=followers[0]["port"],
-            robot_cal_dir=followers[0]["calibration_dir"],
-            robot_id=_arm_id(followers[0]),
-            teleop_type=leaders[0]["type"],
-            teleop_port=leaders[0]["port"],
-            teleop_cal_dir=leaders[0]["calibration_dir"],
-            teleop_id=_arm_id(leaders[0]),
-            cameras=cameras,
-            **display_kwargs,
+    if len(ctx.followers) == 1:
+        return ctx.controller.teleoperate(
+            robot_type=ctx.followers[0]["type"],
+            robot_port=ctx.followers[0]["port"],
+            robot_cal_dir=ctx.followers[0]["calibration_dir"],
+            robot_id=_arm_id(ctx.followers[0]),
+            teleop_type=ctx.leaders[0]["type"],
+            teleop_port=ctx.leaders[0]["port"],
+            teleop_cal_dir=ctx.leaders[0]["calibration_dir"],
+            teleop_id=_arm_id(ctx.leaders[0]),
+            cameras=ctx.cameras,
+            **ctx.display_kwargs,
         )
 
-    robot_dir = ensure_bimanual_cal_dir(followers[0], followers[1], "followers")
-    teleop_dir = ensure_bimanual_cal_dir(leaders[0], leaders[1], "leaders")
-    return controller.teleoperate_bimanual(
+    robot_dir = ensure_bimanual_cal_dir(ctx.followers[0], ctx.followers[1], "followers")
+    teleop_dir = ensure_bimanual_cal_dir(ctx.leaders[0], ctx.leaders[1], "leaders")
+    return ctx.controller.teleoperate_bimanual(
         robot_id=_BIMANUAL_ID,
         robot_cal_dir=robot_dir,
-        left_robot=followers[0],
-        right_robot=followers[1],
+        left_robot=ctx.followers[0],
+        right_robot=ctx.followers[1],
         teleop_id=_BIMANUAL_ID,
         teleop_cal_dir=teleop_dir,
-        left_teleop=leaders[0],
-        right_teleop=leaders[1],
-        cameras=cameras,
-        **display_kwargs,
+        left_teleop=ctx.leaders[0],
+        right_teleop=ctx.leaders[1],
+        cameras=ctx.cameras,
+        **ctx.display_kwargs,
     )
 
 
@@ -226,14 +255,11 @@ def prepare_record(
     """
     from datetime import datetime
 
-    from roboclaw.embodied.embodiment.arm.command_builder import ArmCommandBuilder
-    from roboclaw.embodied.embodiment.arm.registry import get_family
-    from roboclaw.embodied.sensor.camera import resolve_cameras
-
-    grouped = group_arms(_resolve_action_arms(setup, kwargs))
-    error = _validate_pairing(grouped["followers"], grouped["leaders"])
-    if error:
-        raise ActionError(error)
+    ctx = _prepare_common(
+        setup, kwargs,
+        display_data=display_data, display_ip=display_ip, display_port=display_port,
+        skip_cameras=kwargs.get("use_cameras") is False,
+    )
 
     # Resolve dataset name
     user_specified = "dataset_name" in kwargs
@@ -245,15 +271,11 @@ def prepare_record(
     if name_error:
         raise ActionError(name_error)
 
-    all_arms = grouped["followers"] + grouped["leaders"]
-    family = get_family(all_arms[0]["type"]) if all_arms else None
-    controller = ArmCommandBuilder(family=family)
-    cameras = {} if kwargs.get("use_cameras") is False else resolve_cameras(setup)
     ds_path = dataset_path(setup, dataset_name)
     resume = user_specified and ds_path.exists()
 
     record_kwargs: dict[str, Any] = {
-        "cameras": cameras,
+        "cameras": ctx.cameras,
         "repo_id": f"local/{dataset_name}",
         "task": kwargs.get("task", "default_task"),
         "dataset_root": str(ds_path),
@@ -274,38 +296,34 @@ def prepare_record(
     if resume:
         record_kwargs["resume"] = True
 
-    display_kw = _display_kwargs(display_data, display_ip, display_port)
-    followers = grouped["followers"]
-    leaders = grouped["leaders"]
-
-    if len(followers) == 1:
-        argv = controller.record(
-            robot_type=followers[0]["type"],
-            robot_port=followers[0]["port"],
-            robot_cal_dir=followers[0]["calibration_dir"],
-            robot_id=_arm_id(followers[0]),
-            teleop_type=leaders[0]["type"],
-            teleop_port=leaders[0]["port"],
-            teleop_cal_dir=leaders[0]["calibration_dir"],
-            teleop_id=_arm_id(leaders[0]),
+    if len(ctx.followers) == 1:
+        argv = ctx.controller.record(
+            robot_type=ctx.followers[0]["type"],
+            robot_port=ctx.followers[0]["port"],
+            robot_cal_dir=ctx.followers[0]["calibration_dir"],
+            robot_id=_arm_id(ctx.followers[0]),
+            teleop_type=ctx.leaders[0]["type"],
+            teleop_port=ctx.leaders[0]["port"],
+            teleop_cal_dir=ctx.leaders[0]["calibration_dir"],
+            teleop_id=_arm_id(ctx.leaders[0]),
             **record_kwargs,
-            **display_kw,
+            **ctx.display_kwargs,
         )
         return argv, dataset_name, str(ds_path)
 
-    robot_dir = ensure_bimanual_cal_dir(followers[0], followers[1], "followers")
-    teleop_dir = ensure_bimanual_cal_dir(leaders[0], leaders[1], "leaders")
-    argv = controller.record_bimanual(
+    robot_dir = ensure_bimanual_cal_dir(ctx.followers[0], ctx.followers[1], "followers")
+    teleop_dir = ensure_bimanual_cal_dir(ctx.leaders[0], ctx.leaders[1], "leaders")
+    argv = ctx.controller.record_bimanual(
         robot_id=_BIMANUAL_ID,
         robot_cal_dir=robot_dir,
-        left_robot=followers[0],
-        right_robot=followers[1],
+        left_robot=ctx.followers[0],
+        right_robot=ctx.followers[1],
         teleop_id=_BIMANUAL_ID,
         teleop_cal_dir=teleop_dir,
-        left_teleop=leaders[0],
-        right_teleop=leaders[1],
+        left_teleop=ctx.leaders[0],
+        right_teleop=ctx.leaders[1],
         **record_kwargs,
-        **display_kw,
+        **ctx.display_kwargs,
     )
     return argv, dataset_name, str(ds_path)
 
