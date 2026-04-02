@@ -8,7 +8,7 @@ consistent busy checks, port locking, and hardware monitor state.
 from __future__ import annotations
 
 import inspect
-from typing import Any, Awaitable, Callable
+from typing import Any
 
 from roboclaw.embodied.hardware_monitor import (
     ArmStatus,
