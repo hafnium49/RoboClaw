@@ -281,6 +281,8 @@ class DashboardSession:
         for port in arm_ports:
             await port_locks._get_lock(port).acquire()
         self._held_port_locks = arm_ports
+        # Flush serial buffers to clear residual data from servo polling
+        await asyncio.to_thread(self._flush_serial_ports, arm_ports)
         try:
             await self._launch_subprocess(argv)
         except Exception:
@@ -457,6 +459,18 @@ class DashboardSession:
             try:
                 self._process.stdin.close()
             except OSError:
+                pass
+
+    @staticmethod
+    def _flush_serial_ports(ports: list[str]) -> None:
+        """Open and flush each serial port to clear residual buffer data."""
+        import serial
+        for port in ports:
+            try:
+                with serial.Serial(port, baudrate=1_000_000, timeout=0.1) as ser:
+                    ser.reset_input_buffer()
+                    ser.reset_output_buffer()
+            except (OSError, serial.SerialException):
                 pass
 
     def _release_port_locks(self) -> None:
