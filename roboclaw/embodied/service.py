@@ -1,15 +1,24 @@
 """Unified service layer for all embodied operations.
 
-Every interface (Dashboard, CLI, Agent Tool) calls EmbodiedService
-instead of managing subprocess lifecycle directly. This ensures
-consistent busy checks, port locking, and hardware monitor state.
+Every interface (Dashboard, CLI, Agent Tool) calls EmbodiedService.
+This is the single coordination point for busy state, hardware monitor
+integration, and operation lifecycle.
 """
 
 from __future__ import annotations
 
+import asyncio
 import inspect
 from typing import Any
 
+from loguru import logger
+
+from roboclaw.embodied.engine import (
+    CalibrationSession,
+    HardwareScanner,
+    OperationEngine,
+    StatusCallback,
+)
 from roboclaw.embodied.hardware_monitor import (
     ArmStatus,
     CameraStatus,
@@ -17,9 +26,9 @@ from roboclaw.embodied.hardware_monitor import (
     check_arm_status,
     check_camera_status,
 )
-from roboclaw.embodied.engine import OperationEngine, StatusCallback
 from roboclaw.embodied.ops.helpers import group_arms
-from roboclaw.embodied.setup import load_setup
+from roboclaw.embodied.port_lock import port_locks
+from roboclaw.embodied.setup import load_setup, mark_arm_calibrated
 
 
 def _compute_readiness(
@@ -48,13 +57,15 @@ def _compute_readiness(
 
 
 class EmbodiedService:
-    """Single point of control for all teleop/record operations.
+    """Single point of control for ALL embodied operations.
 
     Responsibilities:
-    1. Ensure only one operation runs at a time (teleop or record)
-    2. Coordinate with HardwareMonitor (recording_active lifecycle)
-    3. Provide operation status queries (busy, get_status)
-    4. Hardware readiness checks
+    1. Busy mutex — only one operation at a time
+    2. HardwareMonitor coordination (recording_active lifecycle)
+    3. Teleop / recording via OperationEngine
+    4. Calibration via CalibrationSession
+    5. Scanning / motion detection via HardwareScanner
+    6. Hardware status and servo reads
     """
 
     def __init__(
@@ -67,8 +78,14 @@ class EmbodiedService:
         self._external_callback = on_state_change
         self._recording_started = False
         self._hw_lock_holder: str = ""
+        # Calibration
+        self._cal_session: CalibrationSession | None = None
+        self._cal_arm_alias: str = ""
+        self._cal_port_cm: Any = None
+        # Scanner
+        self._scanner = HardwareScanner()
 
-    # -- Properties -----------------------------------------------------------
+    # -- Busy state -----------------------------------------------------------
 
     @property
     def busy(self) -> bool:
@@ -121,7 +138,6 @@ class EmbodiedService:
 
     async def stop(self) -> None:
         await self._session.stop()
-        # recording_active is reset by _on_session_state_change callback
 
     # -- Episode control ------------------------------------------------------
 
@@ -134,7 +150,97 @@ class EmbodiedService:
     async def skip_reset(self) -> None:
         await self._session.skip_reset()
 
-    # -- Hardware status ------------------------------------------------------
+    # -- Calibration ----------------------------------------------------------
+
+    async def start_calibration(self, arm_alias: str) -> dict[str, Any]:
+        """Start calibrating an arm. Acquires hardware lock + port lock."""
+        self.acquire_hardware("calibrating")
+        setup = load_setup()
+        arm = _find_arm(setup, arm_alias)
+        port = arm.get("port", "")
+        if port:
+            self._cal_port_cm = port_locks.acquire(port)
+            await self._cal_port_cm.__aenter__()
+
+        session = CalibrationSession(arm)
+        try:
+            await asyncio.to_thread(session.connect)
+        except Exception:
+            await self._cleanup_calibration()
+            raise
+
+        self._cal_session = session
+        self._cal_arm_alias = arm_alias
+        return {"state": session.state, "arm_alias": arm_alias}
+
+    def get_calibration_status(self) -> dict[str, Any]:
+        if self._cal_session is None:
+            return {"state": "idle", "arm_alias": ""}
+        return {"state": self._cal_session.state, "arm_alias": self._cal_arm_alias}
+
+    async def set_calibration_homing(self) -> dict[str, Any]:
+        self._require_calibration()
+        offsets = await asyncio.to_thread(self._cal_session.set_homing)
+        return {"state": self._cal_session.state, "homing_offsets": offsets}
+
+    async def read_calibration_positions(self) -> dict[str, Any]:
+        self._require_calibration()
+        if self._cal_session.state != "recording":
+            raise RuntimeError(f"Not recording (state={self._cal_session.state})")
+        snapshot = await asyncio.to_thread(self._cal_session.read_range_positions)
+        return {
+            "positions": snapshot.positions,
+            "mins": snapshot.mins,
+            "maxes": snapshot.maxes,
+        }
+
+    async def finish_calibration(self) -> dict[str, Any]:
+        self._require_calibration()
+        calibration = await asyncio.to_thread(self._cal_session.finish)
+        mark_arm_calibrated(self._cal_arm_alias)
+        await self._cleanup_calibration()
+        return {"state": "done", "calibration": calibration}
+
+    async def cancel_calibration(self) -> None:
+        if self._cal_session is not None:
+            await asyncio.to_thread(self._cal_session.cancel)
+        await self._cleanup_calibration()
+
+    def _require_calibration(self) -> None:
+        if self._cal_session is None:
+            raise RuntimeError("No calibration session active.")
+
+    async def _cleanup_calibration(self) -> None:
+        if self._cal_port_cm is not None:
+            await self._cal_port_cm.__aexit__(None, None, None)
+            self._cal_port_cm = None
+        if self._cal_session is not None:
+            await asyncio.to_thread(self._cal_session.disconnect)
+            self._cal_session = None
+        self._cal_arm_alias = ""
+        self.release_hardware()
+
+    # -- Scanning / motion detection ------------------------------------------
+
+    def scan_ports(self) -> list[dict]:
+        return self._scanner.scan_ports()
+
+    def scan_cameras(self) -> list[dict]:
+        return self._scanner.scan_cameras_list()
+
+    def capture_camera_previews(self, output_dir: str) -> list[dict]:
+        return self._scanner.capture_camera_previews(output_dir)
+
+    def start_motion_detection(self) -> int:
+        return self._scanner.start_motion_detection()
+
+    def poll_motion(self) -> list[dict]:
+        return self._scanner.poll_motion()
+
+    def stop_motion_detection(self) -> None:
+        self._scanner.stop_motion_detection()
+
+    # -- Hardware status / servo ----------------------------------------------
 
     def get_hardware_status(self) -> dict[str, Any]:
         setup = load_setup()
@@ -151,40 +257,27 @@ class EmbodiedService:
             "session_busy": self._session.busy,
         }
 
-    # -- CLI TTY paths --------------------------------------------------------
-
-    async def run_teleop_tty(self, tty_handoff: Any, setup: dict[str, Any], kwargs: dict[str, Any]) -> str:
-        """CLI path: busy check then delegate to existing _do_teleoperate."""
+    def read_servo_positions(self) -> dict[str, Any]:
+        """Read servo positions. Returns busy error if operation in progress."""
         if self.busy:
-            return "Another operation is in progress. Stop it first."
-        from roboclaw.embodied.ops.execute import _do_teleoperate
-
-        return await _do_teleoperate(setup, kwargs, tty_handoff)
-
-    async def run_record_tty(self, tty_handoff: Any, setup: dict[str, Any], kwargs: dict[str, Any]) -> str:
-        """CLI path: busy check then delegate to existing _do_record."""
-        if self.busy:
-            return "Another operation is in progress. Stop it first."
-        from roboclaw.embodied.ops.execute import _do_record
-
-        return await _do_record(setup, kwargs, tty_handoff)
+            return {"error": "busy", "arms": {}}
+        from roboclaw.embodied.motors import read_servo_positions
+        return read_servo_positions()
 
     # -- Shutdown -------------------------------------------------------------
 
     async def shutdown(self) -> None:
         if self._session.busy:
             await self._session.stop()
+        if self._cal_session is not None:
+            await self.cancel_calibration()
         if self._monitor is not None:
             self._monitor.set_recording_active(False)
 
     # -- Internal: state change routing ---------------------------------------
 
     async def _on_session_state_change(self, status: dict[str, Any]) -> None:
-        """Called by OperationEngine on every state transition.
-
-        Only resets recording_active when transitioning from an active
-        recording (not from teleop or other states).
-        """
+        """Called by OperationEngine on every state transition."""
         new_state = status.get("state", "idle")
         if new_state == "idle" and self._recording_started:
             self._recording_started = False
@@ -195,3 +288,10 @@ class EmbodiedService:
             result = self._external_callback(status)
             if inspect.isawaitable(result):
                 await result
+
+
+def _find_arm(setup: dict, alias: str) -> dict:
+    for arm in setup.get("arms", []):
+        if arm.get("alias") == alias:
+            return arm
+    raise RuntimeError(f"Arm '{alias}' not found in setup.")
