@@ -17,7 +17,7 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from roboclaw.embodied.service import EmbodiedService, EmbodimentBusyError
-from roboclaw.http.dashboard import register_dashboard_routes
+from roboclaw.http.routes import register_all_routes
 
 # ---------------------------------------------------------------------------
 # Mock setup data
@@ -90,7 +90,7 @@ def app_and_service(service):
         async def broadcast(self, event):
             pass
 
-    register_dashboard_routes(
+    register_all_routes(
         app, FakeChannel(), service, get_config=lambda: ("0.0.0.0", 8765),
     )
     return app, service

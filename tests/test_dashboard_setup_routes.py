@@ -11,7 +11,7 @@ pytest.importorskip("fastapi")
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-from roboclaw.http.dashboard_setup import register_setup_routes
+from roboclaw.http.routes.setup import register_setup_routes
 
 
 _MOCK_PORTS = [

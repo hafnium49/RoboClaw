@@ -18,7 +18,6 @@ def register_calibrate_routes(app: FastAPI, service: Any) -> None:
     API = "/api/dashboard/calibrate"
 
     def _handle_calibration_error(exc: RuntimeError) -> None:
-        """Convert calibration RuntimeErrors to appropriate HTTP errors."""
         raise HTTPException(409, str(exc)) from exc
 
     @app.post(f"{API}/start")

@@ -10,9 +10,6 @@ from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 
 
-# Request models
-
-
 class AddArmRequest(BaseModel):
     alias: str
     arm_type: str
@@ -29,12 +26,7 @@ class RenameRequest(BaseModel):
 
 
 def _map_service_errors(app: FastAPI) -> None:
-    """Map EmbodimentBusyError to 409 Conflict.
-
-    Only registers a handler for our own custom exception.
-    RuntimeError / PermissionError are too broad — registering global
-    handlers for them would mask real bugs in unrelated routes.
-    """
+    """Map EmbodimentBusyError to 409 Conflict."""
     from fastapi.requests import Request
     from fastapi.responses import JSONResponse
 
@@ -46,13 +38,7 @@ def _map_service_errors(app: FastAPI) -> None:
 
 
 def register_setup_routes(app: FastAPI, service: Any) -> None:
-    """Register setup wizard API endpoints.
-
-    Lock management lives in ScanningService — routes are thin adapters.
-    EmbodimentBusyError is caught by the global handler registered
-    in _map_service_errors().  RuntimeError / PermissionError are
-    caught locally in each route that can surface them.
-    """
+    """Register /api/dashboard/setup/* routes on the given app."""
     _map_service_errors(app)
 
     @app.post("/api/dashboard/setup/scan")
@@ -72,7 +58,7 @@ def register_setup_routes(app: FastAPI, service: Any) -> None:
                 service.scanning.capture_previews, output_dir,
             )
         except EmbodimentBusyError:
-            raise  # Let the 409 handler deal with it
+            raise
         except RuntimeError as exc:
             raise HTTPException(400, str(exc)) from exc
 
@@ -94,7 +80,7 @@ def register_setup_routes(app: FastAPI, service: Any) -> None:
                 service.scanning.start_motion_detection,
             )
         except EmbodimentBusyError:
-            raise  # Let the 409 handler deal with it
+            raise
         except RuntimeError as exc:
             raise HTTPException(400, str(exc)) from exc
         return {"status": "watching", "port_count": port_count}

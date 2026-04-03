@@ -232,7 +232,7 @@ def create_app(
 
     # Dashboard routes
     if web_ch is not None:
-        from roboclaw.http.dashboard import register_dashboard_routes
+        from roboclaw.http.routes import register_all_routes
 
         app.state.hardware_monitor = runtime.hw_monitor
         app.state.embodied_service = runtime.embodied_service
@@ -245,7 +245,7 @@ def create_app(
             if isinstance(tool, EmbodiedToolGroup):
                 tool.embodied_service = runtime.embodied_service
 
-        register_dashboard_routes(
+        register_all_routes(
             app,
             web_ch,
             runtime.embodied_service,
