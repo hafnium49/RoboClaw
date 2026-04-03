@@ -11,7 +11,7 @@ import pytest
 
 from unittest.mock import patch as std_patch
 
-from roboclaw.embodied.setup import (
+from roboclaw.embodied.manifest.helpers import (
     arm_display_name,
     find_arm,
     find_camera,
@@ -184,7 +184,7 @@ async def test_doctor_action() -> None:
     mock_runner.run.return_value = (0, "lerobot 0.5.0", "")
 
     with (
-        patch("roboclaw.embodied.setup.ensure_setup", return_value=_MOCK_SETUP),
+        patch("roboclaw.embodied.manifest.helpers.ensure_setup", return_value=_MOCK_SETUP),
         patch("roboclaw.embodied.runner.LocalLeRobotRunner", return_value=mock_runner),
     ):
         result = await tool.execute(action="doctor")
@@ -200,8 +200,8 @@ async def test_calibrate_all_arms() -> None:
     mock_runner.run_interactive.return_value = (0, "")
 
     with (
-        patch("roboclaw.embodied.setup.ensure_setup", return_value=_MOCK_SETUP),
-        patch("roboclaw.embodied.setup.mark_arm_calibrated") as mock_mark,
+        patch("roboclaw.embodied.manifest.helpers.ensure_setup", return_value=_MOCK_SETUP),
+        patch("roboclaw.embodied.manifest.helpers.mark_arm_calibrated") as mock_mark,
         patch("roboclaw.embodied.runner.LocalLeRobotRunner", return_value=mock_runner),
     ):
         result = await tool.execute(action="calibrate")
@@ -225,8 +225,8 @@ async def test_calibrate_selected_arms_even_if_calibrated() -> None:
     mock_runner.run_interactive.return_value = (0, "")
 
     with (
-        patch("roboclaw.embodied.setup.ensure_setup", return_value=setup),
-        patch("roboclaw.embodied.setup.mark_arm_calibrated") as mock_mark,
+        patch("roboclaw.embodied.manifest.helpers.ensure_setup", return_value=setup),
+        patch("roboclaw.embodied.manifest.helpers.mark_arm_calibrated") as mock_mark,
         patch("roboclaw.embodied.runner.LocalLeRobotRunner", return_value=mock_runner),
     ):
         result = await tool.execute(action="calibrate", arms=_FOLLOWER_PORT)
@@ -238,7 +238,7 @@ async def test_calibrate_selected_arms_even_if_calibrated() -> None:
 @pytest.mark.asyncio
 async def test_calibrate_no_arms() -> None:
     tool = _find_tool(create_embodied_tools(), "embodied_hardware")
-    with patch("roboclaw.embodied.setup.ensure_setup", return_value={**_MOCK_SETUP, "arms": []}):
+    with patch("roboclaw.embodied.manifest.helpers.ensure_setup", return_value={**_MOCK_SETUP, "arms": []}):
         result = await tool.execute(action="calibrate")
     assert result == "No arms configured."
 
@@ -246,7 +246,7 @@ async def test_calibrate_no_arms() -> None:
 @pytest.mark.asyncio
 async def test_calibrate_missing_arm() -> None:
     tool = _find_tool(create_embodied_tools(tty_handoff=AsyncMock()), "embodied_hardware")
-    with patch("roboclaw.embodied.setup.ensure_setup", return_value=_MOCK_SETUP):
+    with patch("roboclaw.embodied.manifest.helpers.ensure_setup", return_value=_MOCK_SETUP):
         result = await tool.execute(action="calibrate", arms="missing_arm")
     assert result == "No arm with port 'missing_arm' found in setup."
 
@@ -258,8 +258,8 @@ async def test_calibrate_interrupted_on_sigint() -> None:
     mock_runner.run_interactive.side_effect = [(0, ""), (130, "")]
 
     with (
-        patch("roboclaw.embodied.setup.ensure_setup", return_value=_MOCK_SETUP),
-        patch("roboclaw.embodied.setup.mark_arm_calibrated") as mock_mark,
+        patch("roboclaw.embodied.manifest.helpers.ensure_setup", return_value=_MOCK_SETUP),
+        patch("roboclaw.embodied.manifest.helpers.mark_arm_calibrated") as mock_mark,
         patch("roboclaw.embodied.runner.LocalLeRobotRunner", return_value=mock_runner),
     ):
         result = await tool.execute(action="calibrate")
@@ -279,7 +279,7 @@ async def test_record_action() -> None:
         return "Recording finished."
 
     with (
-        patch("roboclaw.embodied.setup.ensure_setup", return_value=_MOCK_SETUP),
+        patch("roboclaw.embodied.manifest.helpers.ensure_setup", return_value=_MOCK_SETUP),
         patch("roboclaw.embodied.adapters.cli.run_cli_session", side_effect=fake_cli_session),
     ):
         result = await tool.execute(
@@ -301,7 +301,7 @@ async def test_record_action_cli_reports_failure() -> None:
         return "Record failed: Process exited with code 7\ncamera init failed"
 
     with (
-        patch("roboclaw.embodied.setup.ensure_setup", return_value=_MOCK_SETUP),
+        patch("roboclaw.embodied.manifest.helpers.ensure_setup", return_value=_MOCK_SETUP),
         patch("roboclaw.embodied.adapters.cli.run_cli_session", side_effect=fake_cli_session),
     ):
         result = await tool.execute(
@@ -324,7 +324,7 @@ async def test_record_action_without_cameras() -> None:
         return "Recording finished."
 
     with (
-        patch("roboclaw.embodied.setup.ensure_setup", return_value=_MOCK_SETUP),
+        patch("roboclaw.embodied.manifest.helpers.ensure_setup", return_value=_MOCK_SETUP),
         patch("roboclaw.embodied.adapters.cli.run_cli_session", side_effect=fake_cli_session),
     ):
         result = await tool.execute(
@@ -347,7 +347,7 @@ async def test_record_action_rejects_non_ascii_dataset_name() -> None:
         return "Recording finished."
 
     with (
-        patch("roboclaw.embodied.setup.ensure_setup", return_value=_MOCK_SETUP),
+        patch("roboclaw.embodied.manifest.helpers.ensure_setup", return_value=_MOCK_SETUP),
         patch("roboclaw.embodied.adapters.cli.run_cli_session", side_effect=fake_cli_session),
     ):
         result = await tool.execute(
@@ -378,7 +378,7 @@ async def test_record_bimanual() -> None:
         return "Recording finished."
 
     with (
-        patch("roboclaw.embodied.setup.ensure_setup", return_value=setup),
+        patch("roboclaw.embodied.manifest.helpers.ensure_setup", return_value=setup),
         patch("roboclaw.embodied.adapters.cli.run_cli_session", side_effect=fake_cli_session),
     ):
         result = await tool.execute(
@@ -398,7 +398,7 @@ async def test_replay_single_uses_followers_only() -> None:
     mock_runner.run_interactive.return_value = (0, "")
 
     with (
-        patch("roboclaw.embodied.setup.ensure_setup", return_value=_MOCK_SETUP),
+        patch("roboclaw.embodied.manifest.helpers.ensure_setup", return_value=_MOCK_SETUP),
         patch("roboclaw.embodied.runner.LocalLeRobotRunner", return_value=mock_runner),
     ):
         result = await tool.execute(action="replay", dataset_name="test", episode=2)
@@ -426,7 +426,7 @@ async def test_replay_bimanual_with_root_fallback() -> None:
     mock_runner.run_interactive.return_value = (0, "")
 
     with (
-        patch("roboclaw.embodied.setup.ensure_setup", return_value=setup),
+        patch("roboclaw.embodied.manifest.helpers.ensure_setup", return_value=setup),
         patch("roboclaw.embodied.manifest.helpers.ensure_bimanual_cal_dir", return_value="/tmp/bimanual") as mock_cal,
         patch("roboclaw.embodied.runner.LocalLeRobotRunner", return_value=mock_runner),
     ):
@@ -443,7 +443,7 @@ async def test_replay_bimanual_with_root_fallback() -> None:
 @pytest.mark.asyncio
 async def test_replay_rejects_explicit_leaders() -> None:
     tool = _find_tool(create_embodied_tools(tty_handoff=AsyncMock()), "embodied_replay")
-    with patch("roboclaw.embodied.setup.ensure_setup", return_value=_MOCK_SETUP):
+    with patch("roboclaw.embodied.manifest.helpers.ensure_setup", return_value=_MOCK_SETUP):
         result = await tool.execute(action="replay", dataset_name="test", arms=_LEADER_PORT)
     assert "Replay only supports follower arms" in result
 
@@ -466,7 +466,7 @@ async def test_teleoperate_bimanual() -> None:
         return "Teleoperation finished."
 
     with (
-        patch("roboclaw.embodied.setup.ensure_setup", return_value=setup),
+        patch("roboclaw.embodied.manifest.helpers.ensure_setup", return_value=setup),
         patch("roboclaw.embodied.adapters.cli.run_cli_session", side_effect=fake_cli_session),
     ):
         result = await tool.execute(action="teleoperate", arms="/dev/a,/dev/b,/dev/c,/dev/d")
@@ -481,7 +481,7 @@ async def test_train_action() -> None:
     mock_runner.run_detached.return_value = "job-abc-123"
 
     with (
-        patch("roboclaw.embodied.setup.ensure_setup", return_value=_MOCK_SETUP),
+        patch("roboclaw.embodied.manifest.helpers.ensure_setup", return_value=_MOCK_SETUP),
         patch("roboclaw.embodied.runner.LocalLeRobotRunner", return_value=mock_runner),
     ):
         result = await tool.execute(action="train", dataset_name="test", steps=5000)
@@ -496,7 +496,7 @@ async def test_run_policy_no_follower_arm() -> None:
     tool = _find_tool(create_embodied_tools(), "embodied_control")
     setup = {**_MOCK_SETUP, "arms": [{**_MOCK_SETUP["arms"][1]}]}
 
-    with patch("roboclaw.embodied.setup.ensure_setup", return_value=setup):
+    with patch("roboclaw.embodied.manifest.helpers.ensure_setup", return_value=setup):
         result = await tool.execute(action="record", checkpoint_path="/models/act")
 
     assert result == "No follower arm configured."
@@ -516,7 +516,7 @@ async def test_run_policy_bimanual() -> None:
     }
 
     with (
-        patch("roboclaw.embodied.setup.ensure_setup", return_value=setup),
+        patch("roboclaw.embodied.manifest.helpers.ensure_setup", return_value=setup),
         patch("roboclaw.embodied.manifest.helpers.ensure_bimanual_cal_dir", return_value="/tmp/bimanual"),
         patch("roboclaw.embodied.runner.LocalLeRobotRunner", return_value=mock_runner),
     ):

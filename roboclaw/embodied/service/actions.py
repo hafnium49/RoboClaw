@@ -110,8 +110,8 @@ def _sync_calibration_to_motors(arm: dict[str, Any]) -> None:
 
 async def do_calibrate(setup: dict[str, Any], kwargs: dict[str, Any], tty_handoff: Any) -> str:
     from roboclaw.embodied.manifest.helpers import arm_display_name
+    from roboclaw.embodied.manifest.helpers import mark_arm_calibrated
     from roboclaw.embodied.runner import LocalLeRobotRunner
-    from roboclaw.embodied.setup import mark_arm_calibrated
 
     configured = setup.get("arms", [])
     if not configured:

@@ -298,8 +298,8 @@ def _find_moved_port(ports: list[dict], baselines: dict[str, dict[int, int]]) ->
 
 
 def _save_arm(alias: str, arm_type: str, port: dict) -> None:
-    """Save arm to setup.json via set_arm."""
-    from roboclaw.embodied.setup import set_arm
+    """Save arm to manifest via set_arm."""
+    from roboclaw.embodied.manifest.helpers import set_arm
 
     port_id = _resolve_port_by_id(port)
     set_arm(alias, arm_type, port_id)

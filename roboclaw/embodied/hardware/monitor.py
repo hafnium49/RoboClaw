@@ -170,7 +170,7 @@ class HardwareMonitor:
         if self._manifest is not None:
             setup = self._manifest.snapshot
         else:
-            from roboclaw.embodied.setup import load_setup
+            from roboclaw.embodied.manifest.helpers import load_setup
             setup = load_setup()
         now = time.time()
         faults: list[HardwareFault] = []

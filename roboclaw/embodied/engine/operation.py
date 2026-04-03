@@ -103,7 +103,7 @@ class OperationEngine:
         self._error_message = ""
         self._stderr_lines = []
         if setup is None:
-            from roboclaw.embodied.setup import load_setup
+            from roboclaw.embodied.manifest.helpers import load_setup
             setup = load_setup()
         await self._start_rerun_server()
         try:
@@ -134,7 +134,7 @@ class OperationEngine:
         self._require_idle_or_raise()
 
         if setup is None:
-            from roboclaw.embodied.setup import load_setup
+            from roboclaw.embodied.manifest.helpers import load_setup
             setup = load_setup()
         await self._start_rerun_server()
         kwargs: dict[str, Any] = {

@@ -1,7 +1,4 @@
-"""Pure helper functions for manifest state management.
-
-Moved from setup.py — no class state, no I/O beyond calibration-file checks.
-"""
+"""Pure helper functions for manifest state management."""
 
 from __future__ import annotations
 
@@ -285,3 +282,65 @@ def _probe_hand_slave_id(hand_type: str, port: str) -> int:
     if len(found) > 1:
         raise ValueError(f"Multiple devices detected on this port (found {len(found)}). Only one hand per port is supported.")
     return found[0]
+
+
+# ── Free-function API (for subprocess / CLI / fallback paths) ────────
+
+
+def _lazy_manifest(path: Path | None = None) -> "Manifest":
+    from roboclaw.embodied.manifest import Manifest
+
+    return Manifest(path=path) if path else Manifest()
+
+
+def load_setup(path: Path | None = None) -> dict[str, Any]:
+    return _lazy_manifest(path).snapshot
+
+
+def save_setup(setup: dict[str, Any], path: Path | None = None) -> None:
+    path = path or get_manifest_path()
+    _validate_setup(setup)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(setup, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+
+
+def ensure_setup(path: Path | None = None) -> dict[str, Any]:
+    return _lazy_manifest(path).ensure()
+
+
+def set_arm(alias: str, arm_type: str, port: str, *, path: Path | None = None) -> dict[str, Any]:
+    m = _lazy_manifest(path)
+    m.set_arm(alias, arm_type, port)
+    return m.snapshot
+
+
+def remove_arm(alias: str, path: Path | None = None) -> dict[str, Any]:
+    return _lazy_manifest(path).remove_arm(alias)
+
+
+def rename_arm(old_alias: str, new_alias: str, *, path: Path | None = None) -> dict[str, Any]:
+    return _lazy_manifest(path).rename_arm(old_alias, new_alias)
+
+
+def mark_arm_calibrated(alias: str, path: Path | None = None) -> dict[str, Any]:
+    return _lazy_manifest(path).mark_arm_calibrated(alias)
+
+
+def set_camera(name: str, camera_index: int, path: Path | None = None) -> dict[str, Any]:
+    m = _lazy_manifest(path)
+    m.set_camera(name, camera_index)
+    return m.snapshot
+
+
+def remove_camera(name: str, path: Path | None = None) -> dict[str, Any]:
+    return _lazy_manifest(path).remove_camera(name)
+
+
+def set_hand(alias: str, hand_type: str, port: str, *, path: Path | None = None) -> dict[str, Any]:
+    m = _lazy_manifest(path)
+    m.set_hand(alias, hand_type, port)
+    return m.snapshot
+
+
+def remove_hand(alias: str, path: Path | None = None) -> dict[str, Any]:
+    return _lazy_manifest(path).remove_hand(alias)

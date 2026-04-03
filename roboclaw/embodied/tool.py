@@ -339,7 +339,7 @@ async def _dispatch_with_setup(
     action: str, kwargs: dict[str, Any], tty_handoff: Any, svc: Any,
 ) -> str | list:
     from roboclaw.embodied.engine.helpers import ActionError
-    from roboclaw.embodied.setup import ensure_setup
+    from roboclaw.embodied.manifest.helpers import ensure_setup
 
     setup = ensure_setup()
 
