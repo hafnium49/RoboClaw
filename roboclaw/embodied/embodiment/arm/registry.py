@@ -129,6 +129,14 @@ def get_role(arm_type: str) -> str:
     return arm_type.rsplit("_", 1)[1]
 
 
+def get_family_by_name(name: str) -> ArmFamily:
+    """Look up arm family by model name (e.g., 'so101', 'koch')."""
+    name = name.lower()
+    if name not in _REGISTRY:
+        raise ValueError(f"Unknown arm model: {name}")
+    return _REGISTRY[name]
+
+
 def all_arm_types() -> tuple[str, ...]:
     """Return all registered arm types (follower + leader for each family)."""
     result: list[str] = []

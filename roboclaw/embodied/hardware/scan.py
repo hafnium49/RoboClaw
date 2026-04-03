@@ -5,8 +5,11 @@ from __future__ import annotations
 import glob
 import os
 import re
+import subprocess
 import sys
 from pathlib import Path
+
+from loguru import logger
 
 
 def _read_symlink_map(directory: str) -> dict[str, str]:
@@ -277,3 +280,58 @@ def _capture_camera_frame(
         }
     finally:
         cap.release()
+
+
+# ---------------------------------------------------------------------------
+# Serial permission helpers (moved from engine/scanner.py)
+# ---------------------------------------------------------------------------
+
+
+def fix_serial_permissions() -> bool:
+    """Install udev rules for serial device access. Returns True on success."""
+    udev_rule = (
+        'KERNEL=="ttyACM[0-9]*", MODE="0666"\n'
+        'KERNEL=="ttyUSB[0-9]*", MODE="0666"\n'
+        'SUBSYSTEM=="tty", ATTRS{idVendor}=="1a86", MODE="0666"\n'
+        'SUBSYSTEM=="video4linux", MODE="0666"\n'
+    )
+    try:
+        result = subprocess.run(
+            ["sudo", "-n", "tee", "/etc/udev/rules.d/99-roboclaw.rules"],
+            input=udev_rule.encode(), capture_output=True, timeout=5,
+        )
+        if result.returncode != 0:
+            logger.warning("Passwordless sudo not available for udev rules")
+            return _try_chmod_devices()
+        subprocess.run(
+            ["sudo", "-n", "udevadm", "control", "--reload-rules"],
+            capture_output=True, timeout=5,
+        )
+        subprocess.run(
+            ["sudo", "-n", "udevadm", "trigger"],
+            capture_output=True, timeout=5,
+        )
+        logger.info("Installed udev rules for serial device access")
+        return True
+    except (subprocess.TimeoutExpired, FileNotFoundError):
+        return _try_chmod_devices()
+
+
+def _try_chmod_devices() -> bool:
+    """Fallback: chmod individual device files."""
+    devices = list_serial_device_paths()
+    if not devices:
+        return False
+    for dev in devices:
+        try:
+            os.chmod(dev, 0o666)
+        except PermissionError:
+            result = subprocess.run(
+                ["sudo", "-n", "chmod", "666", dev],
+                capture_output=True, timeout=5,
+            )
+            if result.returncode != 0:
+                logger.warning("Cannot chmod {}: no passwordless sudo", dev)
+                return False
+    logger.info("Fixed serial device permissions via chmod")
+    return True
