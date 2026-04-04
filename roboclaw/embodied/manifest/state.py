@@ -163,6 +163,17 @@ class Manifest:
             found = find_hand(self._data.get("hands", []), alias)
             return copy.deepcopy(found) if found else None
 
+    def find_binding(self, alias: str) -> Binding | None:
+        """Find a Binding by alias across arms, cameras, and hands."""
+        for b in self.bindings:
+            if b.alias == alias:
+                return b
+        return None
+
+    def get_guard(self, port: str) -> InterfaceGuard | None:
+        """Get an InterfaceGuard by port/stable_id string."""
+        return self._guards.get(port)
+
     # ── Write methods (lock + validate + persist + emit) ──────────────
 
     def set_arm(

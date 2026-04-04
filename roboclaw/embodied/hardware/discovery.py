@@ -3,13 +3,6 @@ from __future__ import annotations
 
 from dataclasses import replace
 
-from roboclaw.embodied.hardware.motion import (
-    MOTION_THRESHOLD,
-    detect_motion,
-    read_positions_for_port,
-    resolve_port_by_id,
-    resolve_port_path,
-)
 from roboclaw.embodied.hardware.probers import _REGISTRY, get_prober
 from roboclaw.embodied.hardware.scan import (
     capture_camera_frames,
@@ -28,7 +21,6 @@ class HardwareDiscovery:
     def __init__(self) -> None:
         self._scanned_ports: list[SerialInterface] = []
         self._scanned_cameras: list[VideoInterface] = []
-        self._baselines: dict[str, dict[int, int]] = {}
         self._motion_active: bool = False
 
     @property
@@ -89,16 +81,14 @@ class HardwareDiscovery:
         """Read baselines for all scanned ports. Returns port count."""
         if not self._scanned_ports:
             raise RuntimeError("No scanned ports. Run discover first.")
-        self._baselines = {}
         saved = suppress_stderr()
         try:
             for port in self._scanned_ports:
-                path = resolve_port_path(port)
-                self._baselines[path] = read_positions_for_port(port)
+                port.motion_detector.capture_baseline()
         finally:
             restore_stderr(saved)
         self._motion_active = True
-        return len(self._baselines)
+        return len(self._scanned_ports)
 
     def poll_motion(self) -> list[dict]:
         """Read current positions and compute motion delta for each port."""
@@ -108,17 +98,14 @@ class HardwareDiscovery:
         saved = suppress_stderr()
         try:
             for port in self._scanned_ports:
-                path = resolve_port_path(port)
-                current = read_positions_for_port(port)
-                baseline = self._baselines.get(path, {})
-                delta = detect_motion(baseline, current)
+                result = port.motion_detector.poll()
                 results.append({
-                    "port_id": resolve_port_by_id(port),
+                    "port_id": port.stable_id,
                     "dev": port.dev,
                     "by_id": port.by_id,
                     "motor_ids": list(port.motor_ids),
-                    "delta": delta,
-                    "moved": delta > MOTION_THRESHOLD,
+                    "delta": result.delta,
+                    "moved": result.moved,
                 })
         finally:
             restore_stderr(saved)
@@ -126,8 +113,9 @@ class HardwareDiscovery:
 
     def stop_motion_detection(self) -> None:
         """Clear baselines and stop motion detection."""
+        for port in self._scanned_ports:
+            port.motion_detector.reset()
         self._motion_active = False
-        self._baselines = {}
 
     def _probe_ports(
         self, ports: list[SerialInterface], prober, protocol: str = "",
@@ -157,7 +145,7 @@ class HardwareDiscovery:
         """Run the prober on each port, return those with motors."""
         result: list[SerialInterface] = []
         for port in ports:
-            path = resolve_port_path(port)
+            path = port.dev or port.by_id or port.by_path
             if not path:
                 continue
             ids = prober.probe(path)

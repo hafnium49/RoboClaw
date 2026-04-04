@@ -26,7 +26,6 @@ from roboclaw.embodied.engine.helpers import (
     prepare_record,
     prepare_teleop,
 )
-from roboclaw.embodied.hardware.port_lock import port_locks
 from roboclaw.embodied.runner import LocalLeRobotRunner
 
 _RE_RECORDING_EP = re.compile(r"Recording episode (\d+)")
@@ -54,7 +53,7 @@ class OperationEngine:
         self._stdout_task: asyncio.Task | None = None
         self._wait_task: asyncio.Task | None = None
         self._cancel_prepare = asyncio.Event()
-        self._held_port_locks: list[str] = []
+        self._held_guards: list = []  # list of InterfaceGuard
         self._rerun_process: asyncio.subprocess.Process | None = None
         self._rerun_grpc_port = 0
         self._rerun_web_port = 0
@@ -294,17 +293,24 @@ class OperationEngine:
         if self._cancel_prepare.is_set():
             self._set_state("idle")
             return
-        # Acquire port locks for all arm serial ports before launching subprocess
+        # Acquire interface guards for all arm serial ports before launching subprocess
         arm_ports = sorted({arm["port"] for arm in manifest.get("arms", []) if arm.get("port")})
+        from roboclaw.embodied.manifest.helpers import _lazy_manifest
+        m = _lazy_manifest()
+        guards = []
         for port in arm_ports:
-            await port_locks._get_lock(port).acquire()
-        self._held_port_locks = arm_ports
+            guard = m.get_guard(port)
+            if guard is not None:
+                await guard._lock.acquire()
+                guard._owner = "operation"
+                guards.append(guard)
+        self._held_guards = guards
         # Flush serial buffers to clear residual data from servo polling
         await asyncio.to_thread(self._flush_serial_ports, arm_ports)
         try:
             await self._launch_subprocess(argv)
         except Exception:
-            self._release_port_locks()
+            self._release_guards()
             raise
         self._set_state(target_state)
 
@@ -356,7 +362,7 @@ class OperationEngine:
         # Clean up
         self._close_stdin()
         self._process = None
-        self._release_port_locks()
+        self._release_guards()
         await self._stop_rerun_server()
         self._episode_phase = ""
         self._set_state("idle")
@@ -430,7 +436,7 @@ class OperationEngine:
         await self._await_stdout_task()
         self._close_stdin()
         self._process = None
-        self._release_port_locks()
+        self._release_guards()
         await self._stop_rerun_server()
 
     async def _kill_subprocess(self) -> None:
@@ -444,7 +450,7 @@ class OperationEngine:
             self._process.kill()
         await self._await_stdout_task()
         self._process = None
-        self._release_port_locks()
+        self._release_guards()
         await self._stop_rerun_server()
 
     async def _await_stdout_task(self) -> None:
@@ -491,12 +497,12 @@ class OperationEngine:
             except (OSError, serial.SerialException):
                 logger.debug("Serial flush skipped for %s", port)
 
-    def _release_port_locks(self) -> None:
-        for port in self._held_port_locks:
-            lock = port_locks._get_lock(port)
-            if lock.locked():
-                lock.release()
-        self._held_port_locks = []
+    def _release_guards(self) -> None:
+        for guard in self._held_guards:
+            if guard._lock.locked():
+                guard._lock.release()
+            guard._owner = ""
+        self._held_guards = []
 
     def _set_state(self, new_state: str) -> None:
         if self._state == new_state:

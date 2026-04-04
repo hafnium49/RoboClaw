@@ -10,13 +10,6 @@ import sys
 
 from roboclaw.embodied.embodiment.arm.registry import all_arm_types
 from roboclaw.embodied.hardware.discovery import HardwareDiscovery
-from roboclaw.embodied.hardware.motion import (
-    MOTION_THRESHOLD,
-    detect_motion,
-    read_positions_for_port,
-    resolve_port_by_id,
-    resolve_port_path,
-)
 from roboclaw.embodied.interface.serial import SerialInterface
 
 # Build dynamic menu from all registered arm types.
@@ -78,9 +71,7 @@ def _confirm(prompt: str) -> bool:
         print("Please enter Y or n.")
 
 
-def _find_moved_port(
-    ports: list[SerialInterface], baselines: dict[str, dict[int, int]],
-) -> SerialInterface | None:
+def _find_moved_port(ports: list[SerialInterface]) -> SerialInterface | None:
     """Read current positions, find the port with largest motion above threshold."""
     from roboclaw.embodied.stub import is_stub_mode, stub_moved_port
 
@@ -90,11 +81,9 @@ def _find_moved_port(
     best_port: SerialInterface | None = None
     best_delta = 0
     for port in ports:
-        path = resolve_port_path(port)
-        current = read_positions_for_port(port)
-        delta = detect_motion(baselines[path], current)
-        if delta > MOTION_THRESHOLD and delta > best_delta:
-            best_delta = delta
+        result = port.motion_detector.poll()
+        if result.moved and result.delta > best_delta:
+            best_delta = result.delta
             best_port = port
     return best_port
 
@@ -103,7 +92,7 @@ def _save_arm(alias: str, arm_type: str, port: SerialInterface) -> None:
     """Save arm to manifest via set_arm."""
     from roboclaw.embodied.manifest.helpers import set_arm
 
-    port_id = resolve_port_by_id(port)
+    port_id = port.stable_id
     set_arm(alias, arm_type, port_id)
     print(f"Saved: {alias} ({arm_type}) on {port_id}")
 
@@ -112,13 +101,14 @@ def _identify_one_arm(
     ports: list[SerialInterface], existing_aliases: set[str],
 ) -> dict | None:
     """Run one round of identification."""
-    baselines = {resolve_port_path(p): read_positions_for_port(p) for p in ports}
+    for p in ports:
+        p.motion_detector.capture_baseline()
     _read_line("\nMove one arm, then press Enter.")
-    moved = _find_moved_port(ports, baselines)
+    moved = _find_moved_port(ports)
     if moved is None:
         print("No movement detected. Try again.")
         return None
-    port_id = resolve_port_by_id(moved)
+    port_id = moved.stable_id
     print(f"\nDetected movement on: {port_id}")
 
     while True:

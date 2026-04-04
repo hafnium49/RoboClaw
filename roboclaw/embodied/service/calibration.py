@@ -7,17 +7,9 @@ from typing import TYPE_CHECKING, Any
 
 from roboclaw.embodied.engine import CalibrationSession
 from roboclaw.embodied.events import CalibrationStateChangedEvent, EventBus
-from roboclaw.embodied.hardware.port_lock import port_locks
 
 if TYPE_CHECKING:
     from roboclaw.embodied.service import EmbodiedService
-
-
-def _find_arm(manifest: dict, alias: str) -> dict:
-    for arm in manifest.get("arms", []):
-        if arm.get("alias") == alias:
-            return arm
-    raise RuntimeError(f"Arm '{alias}' not found in manifest.")
 
 
 class CalibrationService:
@@ -31,15 +23,16 @@ class CalibrationService:
         self._port_cm: Any = None
 
     async def start(self, arm_alias: str) -> dict[str, Any]:
-        """Start calibrating an arm. Acquires embodiment lock + port lock."""
+        """Start calibrating an arm. Acquires embodiment lock + interface guard."""
         self._parent.acquire_embodiment("calibrating")
-        manifest = self._parent.manifest.snapshot
-        arm = _find_arm(manifest, arm_alias)
-        port = arm.get("port", "")
-        if port:
-            self._port_cm = port_locks.acquire(port)
-            await self._port_cm.__aenter__()
+        binding = self._parent.manifest.find_binding(arm_alias)
+        if binding is None:
+            self._parent.release_embodiment()
+            raise RuntimeError(f"Arm '{arm_alias}' not found in manifest.")
+        self._port_cm = binding.guard.acquire("calibrating")
+        await self._port_cm.__aenter__()
 
+        arm = self._parent.manifest.find_arm(arm_alias)
         session = CalibrationSession(arm)
         try:
             await asyncio.to_thread(session.connect)

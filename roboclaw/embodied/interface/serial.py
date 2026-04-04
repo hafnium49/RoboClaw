@@ -2,9 +2,12 @@ from __future__ import annotations
 
 import os
 from dataclasses import dataclass, field
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from roboclaw.embodied.interface.base import Interface
+
+if TYPE_CHECKING:
+    from roboclaw.embodied.hardware.motion_detector import MotionDetector
 
 
 @dataclass(frozen=True)
@@ -17,6 +20,15 @@ class SerialInterface(Interface):
     bus_type: str = ""  # "feetech" / "dynamixel" / "modbus"
     motor_ids: tuple[int, ...] = ()
     interface_type: str = field(default="serial", init=False)
+
+    def __post_init__(self) -> None:
+        from roboclaw.embodied.hardware.motion_detector import MotionDetector
+
+        object.__setattr__(self, "_motion_detector", MotionDetector(self))
+
+    @property
+    def motion_detector(self) -> MotionDetector:
+        return object.__getattribute__(self, "_motion_detector")
 
     @property
     def address(self) -> str:

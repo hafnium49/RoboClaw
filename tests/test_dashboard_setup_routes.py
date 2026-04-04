@@ -116,7 +116,7 @@ def test_motion_start_after_scan() -> None:
     with _patched_scan():
         client.post("/api/dashboard/setup/scan")
 
-    with patch("roboclaw.embodied.hardware.discovery.read_positions_for_port", return_value={1: 100, 2: 200}):
+    with patch("roboclaw.embodied.hardware.motion_detector.MotionDetector._read_positions", return_value={1: 100, 2: 200}):
         resp = client.post("/api/dashboard/setup/motion/start")
 
     assert resp.status_code == 200
@@ -136,9 +136,9 @@ def test_motion_poll_returns_deltas() -> None:
     client = TestClient(app)
     with _patched_scan():
         client.post("/api/dashboard/setup/scan")
-    with patch("roboclaw.embodied.hardware.discovery.read_positions_for_port", return_value={1: 100, 2: 200}):
+    with patch("roboclaw.embodied.hardware.motion_detector.MotionDetector._read_positions", return_value={1: 100, 2: 200}):
         client.post("/api/dashboard/setup/motion/start")
-    with patch("roboclaw.embodied.hardware.discovery.read_positions_for_port", return_value={1: 200, 2: 300}):
+    with patch("roboclaw.embodied.hardware.motion_detector.MotionDetector._read_positions", return_value={1: 200, 2: 300}):
         resp = client.get("/api/dashboard/setup/motion/poll")
 
     assert resp.status_code == 200
