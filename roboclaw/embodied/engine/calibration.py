@@ -16,7 +16,8 @@ from pathlib import Path
 from typing import Any
 
 from roboclaw.embodied.embodiment.arm.base import ServoArmSpec
-from roboclaw.embodied.embodiment.arm.registry import get_arm_spec, get_role
+from roboclaw.embodied.embodiment.arm.registry import get_role
+from roboclaw.embodied.manifest.binding import Binding
 
 
 @dataclass
@@ -48,10 +49,10 @@ class CalibrationSession:
         Same methods, wrapped in asyncio.to_thread and exposed via HTTP.
     """
 
-    def __init__(self, arm: dict[str, Any]) -> None:
+    def __init__(self, arm: Binding) -> None:
         self._arm = arm
-        self._spec = get_arm_spec(arm["type"])
-        self._role = get_role(arm["type"])
+        self._spec = arm.spec
+        self._role = get_role(arm.type_name)
         self._bus: Any = None
         self._state = "idle"
         self._homing_offsets: dict[str, int] = {}
@@ -81,7 +82,7 @@ class CalibrationSession:
             motors[name] = Motor(id=i + 1, model=model, norm_mode=MotorNormMode.RANGE_M100_100)
 
         BusClass = self._import_bus_class()
-        self._bus = BusClass(port=self._arm["port"], motors=motors)
+        self._bus = BusClass(port=self._arm.port, motors=motors)
         self._bus.connect()
         self._bus.disable_torque()
 
@@ -198,7 +199,7 @@ class CalibrationSession:
 
     def _save_calibration(self, calibration: dict) -> None:
         """Save calibration dict to JSON file."""
-        cal_dir = self._arm.get("calibration_dir", "")
+        cal_dir = self._arm.calibration_dir
         if not cal_dir:
             return
         path = Path(cal_dir)

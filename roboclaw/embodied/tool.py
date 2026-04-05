@@ -314,7 +314,7 @@ async def _dispatch(
         return svc.queries.get_manifest()
     if action == "scan":
         model = kwargs.get("model", "")
-        result = await asyncio.to_thread(svc.scanning.run_full_scan, model)
+        result = await asyncio.to_thread(svc.setup.run_full_scan, model)
         return _format_scan(result)
     if action == "describe":
         return svc.queries.describe_actions(kwargs.get("target_action", ""))
@@ -346,6 +346,7 @@ async def _dispatch_with_manifest(
     from roboclaw.embodied.manifest.helpers import ensure_manifest
 
     manifest = ensure_manifest()
+    svc.manifest = manifest
 
     try:
         return await _run_action(action, kwargs, tty_handoff, svc, manifest)
@@ -354,7 +355,7 @@ async def _dispatch_with_manifest(
 
 
 async def _run_action(
-    action: str, kwargs: dict[str, Any], tty_handoff: Any, svc: Any, manifest: dict,
+    action: str, kwargs: dict[str, Any], tty_handoff: Any, svc: Any, manifest: Any,
 ) -> str | list:
     if action == "list_datasets":
         return svc.queries.list_datasets(manifest)

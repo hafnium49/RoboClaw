@@ -9,6 +9,7 @@ from typing import Any
 
 from roboclaw.embodied.embodiment.arm.base import ServoArmSpec
 from roboclaw.embodied.embodiment.arm.registry import get_arm_spec
+from roboclaw.embodied.manifest.binding import Binding
 
 
 class ArmCommandBuilder:
@@ -73,9 +74,9 @@ class ArmCommandBuilder:
     def teleoperate_bimanual(
         self,
         robot_id: str, robot_cal_dir: str,
-        left_robot: dict, right_robot: dict,
+        left_robot: Binding, right_robot: Binding,
         teleop_id: str, teleop_cal_dir: str,
-        left_teleop: dict, right_teleop: dict,
+        left_teleop: Binding, right_teleop: Binding,
         cameras: dict[str, dict] | None = None,
         display_data: bool = False,
         display_ip: str = "",
@@ -131,9 +132,9 @@ class ArmCommandBuilder:
     def record_bimanual(
         self,
         robot_id: str, robot_cal_dir: str,
-        left_robot: dict, right_robot: dict,
+        left_robot: Binding, right_robot: Binding,
         teleop_id: str, teleop_cal_dir: str,
-        left_teleop: dict, right_teleop: dict,
+        left_teleop: Binding, right_teleop: Binding,
         cameras: dict[str, dict],
         repo_id: str, task: str,
         dataset_root: str,
@@ -189,8 +190,8 @@ class ArmCommandBuilder:
         self,
         robot_id: str,
         robot_cal_dir: str,
-        left_robot: dict,
-        right_robot: dict,
+        left_robot: Binding,
+        right_robot: Binding,
         repo_id: str,
         dataset_root: str,
         episode: int,
@@ -235,7 +236,7 @@ class ArmCommandBuilder:
     def run_policy_bimanual(
         self,
         robot_id: str, robot_cal_dir: str,
-        left_robot: dict, right_robot: dict,
+        left_robot: Binding, right_robot: Binding,
         cameras: dict[str, dict],
         policy_path: str,
         repo_id: str = "local/eval",
@@ -347,22 +348,22 @@ class ArmCommandBuilder:
     def _bimanual_arm_args(
         self,
         prefix: str,
-        left: dict,
-        right: dict,
+        left: Binding,
+        right: Binding,
         cameras: dict[str, dict] | None = None,
     ) -> list[str]:
         args: list[str] = []
         for side, arm in [("left", left), ("right", right)]:
-            args.append(f"--{prefix}.{side}_arm_config.port={arm['port']}")
+            args.append(f"--{prefix}.{side}_arm_config.port={arm.port}")
         if cameras:
             args.append(f"--{prefix}.left_arm_config.cameras={json.dumps(cameras)}")
         return args
 
 
 
-def builder_for_arms(arms: list[dict[str, Any]]) -> ArmCommandBuilder:
+def builder_for_arms(arms: list[Binding]) -> ArmCommandBuilder:
     """Create an ArmCommandBuilder with the spec derived from arm types."""
     if not arms:
         return ArmCommandBuilder()
-    spec = get_arm_spec(arms[0]["type"])
+    spec = get_arm_spec(arms[0].type_name)
     return ArmCommandBuilder(spec=spec)

@@ -29,6 +29,12 @@ class RenameRequest(BaseModel):
     new_alias: str
 
 
+class AssignRequest(BaseModel):
+    interface_stable_id: str
+    alias: str
+    spec_name: str
+
+
 def _map_service_errors(app: FastAPI) -> None:
     """Map EmbodimentBusyError to 409 Conflict."""
     from fastapi.requests import Request
@@ -49,7 +55,7 @@ def register_setup_routes(app: FastAPI, service: Any) -> None:
     async def setup_scan(body: ScanRequest | None = None) -> dict[str, Any]:
         model = body.model if body else ""
         try:
-            result = await asyncio.to_thread(service.scanning.run_full_scan, model)
+            result = await asyncio.to_thread(service.setup.run_full_scan, model)
             return {
                 "ports": [p.to_dict() for p in result["ports"]],
                 "cameras": [c.to_dict() for c in result["cameras"]],
@@ -64,7 +70,7 @@ def register_setup_routes(app: FastAPI, service: Any) -> None:
         output_dir = str(Path("/tmp/roboclaw-camera-previews"))
         try:
             return await asyncio.to_thread(
-                service.scanning.capture_previews, output_dir,
+                service.setup.capture_previews, output_dir,
             )
         except EmbodimentBusyError:
             raise
@@ -86,7 +92,7 @@ def register_setup_routes(app: FastAPI, service: Any) -> None:
 
         try:
             port_count = await asyncio.to_thread(
-                service.scanning.start_motion_detection,
+                service.setup.start_motion_detection,
             )
         except EmbodimentBusyError:
             raise
@@ -97,15 +103,53 @@ def register_setup_routes(app: FastAPI, service: Any) -> None:
     @app.get("/api/dashboard/setup/motion/poll")
     async def motion_poll() -> dict[str, Any]:
         try:
-            results = await asyncio.to_thread(service.scanning.poll_motion)
+            results = await asyncio.to_thread(service.setup.poll_motion)
         except RuntimeError as exc:
             raise HTTPException(400, str(exc)) from exc
         return {"ports": results}
 
     @app.post("/api/dashboard/setup/motion/stop")
     async def motion_stop() -> dict[str, str]:
-        await asyncio.to_thread(service.scanning.stop_motion_detection)
+        await asyncio.to_thread(service.setup.stop_motion_detection)
         return {"status": "stopped"}
+
+    # -- SetupSession assign/commit ------------------------------------------
+
+    @app.get("/api/dashboard/setup/session")
+    async def setup_session_status() -> dict[str, Any]:
+        return service.setup.to_dict()
+
+    @app.post("/api/dashboard/setup/session/assign")
+    async def setup_assign(body: AssignRequest) -> dict[str, Any]:
+        try:
+            assignment = service.setup.assign(
+                body.interface_stable_id, body.alias, body.spec_name,
+            )
+        except (RuntimeError, ValueError) as exc:
+            raise HTTPException(400, str(exc)) from exc
+        return {
+            "status": "assigned",
+            "alias": assignment.alias,
+            "spec_name": assignment.spec_name,
+        }
+
+    @app.delete("/api/dashboard/setup/session/assign/{alias}")
+    async def setup_unassign(alias: str) -> dict[str, str]:
+        try:
+            service.setup.unassign(alias)
+        except (RuntimeError, ValueError) as exc:
+            raise HTTPException(400, str(exc)) from exc
+        return {"status": "unassigned", "alias": alias}
+
+    @app.post("/api/dashboard/setup/session/commit")
+    async def setup_commit() -> dict[str, Any]:
+        try:
+            count = await asyncio.to_thread(service.setup.commit)
+        except (RuntimeError, ValueError) as exc:
+            raise HTTPException(400, str(exc)) from exc
+        return {"status": "committed", "bindings_created": count}
+
+    # -- Direct arm/camera CRUD (legacy, still useful) -----------------------
 
     @app.post("/api/dashboard/setup/arm")
     async def setup_add_arm(body: AddArmRequest) -> dict[str, Any]:

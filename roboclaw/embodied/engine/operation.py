@@ -26,6 +26,7 @@ from roboclaw.embodied.engine.helpers import (
     prepare_record,
     prepare_teleop,
 )
+from roboclaw.embodied.manifest import Manifest
 from roboclaw.embodied.runner import LocalLeRobotRunner
 
 _RE_RECORDING_EP = re.compile(r"Recording episode (\d+)")
@@ -97,14 +98,13 @@ class OperationEngine:
 
     # -- Lifecycle ---------------------------------------------------------
 
-    async def start_teleop(self, *, fps: int = 30, setup: dict[str, Any] | None = None) -> None:
+    async def start_teleop(self, *, fps: int = 30, setup: Manifest | None = None) -> None:
         self._require_idle_or_raise()
         self._error_message = ""
         self._stderr_lines = []
         manifest = setup
         if manifest is None:
-            from roboclaw.embodied.manifest.helpers import load_manifest
-            manifest = load_manifest()
+            manifest = Manifest()
         await self._start_rerun_server()
         try:
             argv = prepare_teleop(
@@ -123,7 +123,7 @@ class OperationEngine:
         fps: int = 30,
         episode_time_s: int = 300,
         reset_time_s: int = 10,
-        setup: dict[str, Any] | None = None,
+        setup: Manifest | None = None,
     ) -> str:
         """Start recording. Returns the generated dataset_name."""
         self._error_message = ""
@@ -135,8 +135,7 @@ class OperationEngine:
 
         manifest = setup
         if manifest is None:
-            from roboclaw.embodied.manifest.helpers import load_manifest
-            manifest = load_manifest()
+            manifest = Manifest()
         await self._start_rerun_server()
         kwargs: dict[str, Any] = {
             "task": task,
@@ -279,7 +278,7 @@ class OperationEngine:
             raise RuntimeError(f"Session busy (state={self._state})")
 
     async def _transition_through_preparing(
-        self, target_state: str, argv: list[str], manifest: dict[str, Any],
+        self, target_state: str, argv: list[str], manifest: Manifest,
     ) -> None:
         self._cancel_prepare.clear()
         self._set_state("preparing")
@@ -294,16 +293,15 @@ class OperationEngine:
             self._set_state("idle")
             return
         # Acquire interface guards for all arm serial ports before launching subprocess
-        arm_ports = sorted({arm["port"] for arm in manifest.get("arms", []) if arm.get("port")})
-        from roboclaw.embodied.manifest.helpers import _lazy_manifest
-        m = _lazy_manifest()
         guards = []
-        for port in arm_ports:
-            guard = m.get_guard(port)
-            if guard is not None:
-                await guard._lock.acquire()
-                guard._owner = "operation"
-                guards.append(guard)
+        for binding in manifest.arms:
+            guard = binding.guard
+            if guard in guards:
+                continue
+            await guard._lock.acquire()
+            guard._owner = "operation"
+            guards.append(guard)
+        arm_ports = sorted({binding.port for binding in manifest.arms if binding.port})
         self._held_guards = guards
         # Flush serial buffers to clear residual data from servo polling
         await asyncio.to_thread(self._flush_serial_ports, arm_ports)

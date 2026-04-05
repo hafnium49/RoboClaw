@@ -8,19 +8,20 @@ import pytest
 
 from roboclaw.embodied.engine import CalibrationSession
 from roboclaw.embodied.embodiment.arm.registry import SO101
+from roboclaw.embodied.manifest.binding import Binding
 
 
 @pytest.fixture
-def arm_config(tmp_path: Path) -> dict:
+def arm_config(tmp_path: Path) -> Binding:
     cal_dir = tmp_path / "calibration" / "TEST_SERIAL"
     cal_dir.mkdir(parents=True)
-    return {
+    return Binding.from_dict({
         "alias": "test_follower",
         "type": "so101_follower",
         "port": "/dev/ttyACM0",
         "calibration_dir": str(cal_dir),
         "calibrated": False,
-    }
+    }, "arm", {})
 
 
 @pytest.fixture
@@ -54,13 +55,13 @@ def mock_bus():
     return bus
 
 
-def test_session_initial_state(arm_config: dict) -> None:
+def test_session_initial_state(arm_config: Binding) -> None:
     session = CalibrationSession(arm_config)
     assert session.state == "idle"
     assert session.spec == SO101
 
 
-def test_session_state_transitions(arm_config: dict, mock_bus: MagicMock) -> None:
+def test_session_state_transitions(arm_config: Binding, mock_bus: MagicMock) -> None:
     session = CalibrationSession(arm_config)
 
     with patch.object(session, "_import_bus_class", return_value=lambda **kw: mock_bus), \
@@ -104,7 +105,7 @@ def test_session_state_transitions(arm_config: dict, mock_bus: MagicMock) -> Non
         mock_bus.write_calibration.assert_called_once()
 
 
-def test_session_saves_calibration_json(arm_config: dict, mock_bus: MagicMock) -> None:
+def test_session_saves_calibration_json(arm_config: Binding, mock_bus: MagicMock) -> None:
     session = CalibrationSession(arm_config)
 
     with patch.object(session, "_import_bus_class", return_value=lambda **kw: mock_bus), \
@@ -140,7 +141,7 @@ def test_session_saves_calibration_json(arm_config: dict, mock_bus: MagicMock) -
         cal = session.finish()
 
         # Check calibration file was written
-        cal_dir = Path(arm_config["calibration_dir"])
+        cal_dir = Path(arm_config.calibration_dir)
         cal_file = cal_dir / f"{cal_dir.name}.json"
         assert cal_file.exists()
         saved = json.loads(cal_file.read_text())
@@ -148,7 +149,7 @@ def test_session_saves_calibration_json(arm_config: dict, mock_bus: MagicMock) -
         assert saved["shoulder_pan"]["homing_offset"] == -100
 
 
-def test_cancel_resets_state(arm_config: dict, mock_bus: MagicMock) -> None:
+def test_cancel_resets_state(arm_config: Binding, mock_bus: MagicMock) -> None:
     session = CalibrationSession(arm_config)
 
     with patch.object(session, "_import_bus_class", return_value=lambda **kw: mock_bus), \
@@ -169,7 +170,7 @@ def test_cancel_resets_state(arm_config: dict, mock_bus: MagicMock) -> None:
         mock_bus.disconnect.assert_called()
 
 
-def test_wrong_state_raises(arm_config: dict) -> None:
+def test_wrong_state_raises(arm_config: Binding) -> None:
     session = CalibrationSession(arm_config)
     with pytest.raises(RuntimeError, match="Cannot set homing"):
         session.set_homing()

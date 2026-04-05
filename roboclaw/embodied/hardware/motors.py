@@ -11,6 +11,7 @@ from typing import Any
 
 from loguru import logger
 
+from roboclaw.embodied.manifest.binding import Binding
 from roboclaw.embodied.manifest.helpers import load_calibration
 
 SO101_MOTOR_NAMES = (
@@ -20,7 +21,7 @@ SO101_MOTOR_NAMES = (
 SO101_MOTOR_MODEL = "sts3215"
 
 
-def _motor_config_from_calibration(arm: dict[str, Any]) -> dict[str, tuple[int, str]]:
+def _motor_config_from_calibration(arm: Binding) -> dict[str, tuple[int, str]]:
     """Read calibration file to discover motor names and IDs.
 
     Returns {name: (id, model)}. Falls back to SO101 defaults if no
@@ -39,15 +40,14 @@ def _motor_config_from_calibration(arm: dict[str, Any]) -> dict[str, tuple[int, 
     }
 
 
-def read_servo_positions(manifest: dict[str, Any]) -> dict[str, Any]:
+def read_servo_positions(arms: list[Binding]) -> dict[str, Any]:
     """Read current servo positions for all arms (followers + leaders).
 
     Returns ``{"error": None, "arms": {alias: {motor_name: position}}}``.
     """
-    arms = manifest.get("arms", [])
     result: dict[str, Any] = {"error": None, "arms": {}}
 
-    active_arms = [a for a in arms if a.get("port")]
+    active_arms = [arm for arm in arms if arm.port]
     if not active_arms:
         return result
 
@@ -55,8 +55,8 @@ def read_servo_positions(manifest: dict[str, Any]) -> dict[str, Any]:
     from lerobot.motors.motors_bus import Motor, MotorNormMode
 
     for arm in active_arms:
-        alias = arm.get("alias", "")
-        port = arm["port"]
+        alias = arm.alias
+        port = arm.port
         motor_config = _motor_config_from_calibration(arm)
         motors = {
             name: Motor(id=mid, model=model, norm_mode=MotorNormMode.RANGE_M100_100)

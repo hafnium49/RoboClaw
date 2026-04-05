@@ -16,8 +16,8 @@ from roboclaw.embodied.manifest import Manifest
 from roboclaw.embodied.service.calibration import CalibrationService
 from roboclaw.embodied.service.config import ConfigService
 from roboclaw.embodied.service.queries import QueryService
-from roboclaw.embodied.service.scanning import ScanningService
 from roboclaw.embodied.service.session import SessionService
+from roboclaw.embodied.service.setup_session import SetupSession
 
 
 class EmbodimentBusyError(RuntimeError):
@@ -35,7 +35,7 @@ class EmbodiedService:
     Sub-services:
     - session: teleop/recording via OperationEngine
     - calibration: arm calibration via CalibrationSession
-    - scanning: port/camera scanning via HardwareDiscovery
+    - setup: hardware setup workflow via SetupSession
     """
 
     def __init__(
@@ -53,7 +53,7 @@ class EmbodiedService:
         # Sub-services
         self.session = SessionService(self, event_bus=self._bus)
         self.calibration = CalibrationService(self, event_bus=self._bus)
-        self.scanning = ScanningService(self)
+        self.setup = SetupSession(self)
         self.config = ConfigService(self)
         self.queries = QueryService(self)
 
@@ -150,8 +150,7 @@ class EmbodiedService:
     async def cancel_calibration(self) -> None:
         await self.calibration.cancel()
 
-    # -- Scanning is accessed via service.scanning directly --------------------
-    # No top-level delegation needed — callers use service.scanning.*
+    # -- Setup is accessed via service.setup directly --------------------------
 
     # -- Delegated: queries ----------------------------------------------------
 
@@ -163,19 +162,19 @@ class EmbodiedService:
 
     # -- Async operations (wrap service/actions.py with embodiment lock) -------
 
-    async def run_calibrate(self, manifest: dict, kwargs: dict, tty_handoff: Any) -> str:
+    async def run_calibrate(self, manifest: Manifest, kwargs: dict, tty_handoff: Any) -> str:
         from roboclaw.embodied.service.actions import do_calibrate
         result = await do_calibrate(manifest, kwargs, tty_handoff)
         self.manifest.reload()  # actions.py writes disk via free function
         return result
 
-    async def run_identify(self, manifest: dict, kwargs: dict, tty_handoff: Any) -> str:
+    async def run_identify(self, manifest: Manifest, kwargs: dict, tty_handoff: Any) -> str:
         from roboclaw.embodied.service.actions import do_identify
         result = await do_identify(manifest, kwargs, tty_handoff)
         self.manifest.reload()  # identify subprocess writes disk directly
         return result
 
-    async def run_replay(self, manifest: dict, kwargs: dict, tty_handoff: Any) -> str:
+    async def run_replay(self, manifest: Manifest, kwargs: dict, tty_handoff: Any) -> str:
         from roboclaw.embodied.service.actions import do_replay
         self.acquire_embodiment("replaying")
         try:
@@ -183,35 +182,35 @@ class EmbodiedService:
         finally:
             self.release_embodiment()
 
-    async def run_doctor(self, manifest: dict, kwargs: dict, tty_handoff: Any) -> str:
+    async def run_doctor(self, manifest: Manifest, kwargs: dict, tty_handoff: Any) -> str:
         from roboclaw.embodied.service.actions import do_doctor
         return await do_doctor(manifest, kwargs, tty_handoff)
 
-    async def start_training(self, manifest: dict, kwargs: dict, tty_handoff: Any) -> str:
+    async def start_training(self, manifest: Manifest, kwargs: dict, tty_handoff: Any) -> str:
         from roboclaw.embodied.service.actions import do_train
         return await do_train(manifest, kwargs, tty_handoff)
 
-    async def get_job_status(self, manifest: dict, kwargs: dict, tty_handoff: Any) -> str:
+    async def get_job_status(self, manifest: Manifest, kwargs: dict, tty_handoff: Any) -> str:
         from roboclaw.embodied.service.actions import do_job_status
         return await do_job_status(manifest, kwargs, tty_handoff)
 
-    async def run_policy(self, manifest: dict, kwargs: dict, tty_handoff: Any) -> str:
+    async def run_policy(self, manifest: Manifest, kwargs: dict, tty_handoff: Any) -> str:
         from roboclaw.embodied.service.actions import do_run_policy
         return await do_run_policy(manifest, kwargs, tty_handoff)
 
-    async def hand_open(self, manifest: dict, kwargs: dict, tty_handoff: Any) -> str:
+    async def hand_open(self, manifest: Manifest, kwargs: dict, tty_handoff: Any) -> str:
         from roboclaw.embodied.service.actions import do_hand_open
         return await do_hand_open(manifest, kwargs, tty_handoff)
 
-    async def hand_close(self, manifest: dict, kwargs: dict, tty_handoff: Any) -> str:
+    async def hand_close(self, manifest: Manifest, kwargs: dict, tty_handoff: Any) -> str:
         from roboclaw.embodied.service.actions import do_hand_close
         return await do_hand_close(manifest, kwargs, tty_handoff)
 
-    async def hand_pose(self, manifest: dict, kwargs: dict, tty_handoff: Any) -> str:
+    async def hand_pose(self, manifest: Manifest, kwargs: dict, tty_handoff: Any) -> str:
         from roboclaw.embodied.service.actions import do_hand_pose
         return await do_hand_pose(manifest, kwargs, tty_handoff)
 
-    async def hand_status(self, manifest: dict, kwargs: dict, tty_handoff: Any) -> str:
+    async def hand_status(self, manifest: Manifest, kwargs: dict, tty_handoff: Any) -> str:
         from roboclaw.embodied.service.actions import do_hand_status
         return await do_hand_status(manifest, kwargs, tty_handoff)
 
@@ -222,7 +221,7 @@ class EmbodiedService:
             await self.session.stop()
         if self.calibration.active:
             await self.calibration.cancel()
-        if self.scanning.motion_active:
-            self.scanning.stop_motion_detection()
+        if self.setup.motion_active:
+            self.setup.stop_motion_detection()
         if self._monitor is not None:
             self._monitor.set_recording_active(False)

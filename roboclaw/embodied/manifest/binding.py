@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any
 
 from roboclaw.embodied.embodiment.base import EmbodimentSpec
@@ -27,6 +28,40 @@ class Binding:
     calibration_dir: str = ""     # arm-specific
     calibrated: bool = False      # arm-specific
     slave_id: int = 0             # hand-specific
+    _kind: str = field(default="", repr=False)
+    _type_name: str = field(default="", repr=False)
+
+    @property
+    def port(self) -> str:
+        return self.interface.address
+
+    @property
+    def type_name(self) -> str:
+        if self._type_name:
+            return self._type_name
+        return self.spec.name
+
+    @property
+    def arm_id(self) -> str:
+        if not self.calibration_dir:
+            return ""
+        return Path(self.calibration_dir).name
+
+    @property
+    def is_follower(self) -> bool:
+        return self.kind == "arm" and "follower" in self.type_name
+
+    @property
+    def is_leader(self) -> bool:
+        return self.kind == "arm" and "leader" in self.type_name
+
+    @property
+    def connected(self) -> bool:
+        return self.interface.exists
+
+    @property
+    def kind(self) -> str:
+        return self._kind
 
     # ── Serialization (backward-compatible with manifest.json) ────────
 
@@ -45,14 +80,14 @@ class Binding:
         if isinstance(self.spec, HandSpec):
             return {
                 "alias": self.alias,
-                "type": self.spec.name,
+                "type": self.type_name,
                 "port": self.interface.address,
                 "slave_id": self.slave_id,
             }
         # Arm
         return {
             "alias": self.alias,
-            "type": self.spec.name,
+            "type": self.type_name,
             "port": self.interface.address,
             "calibration_dir": self.calibration_dir,
             "calibrated": self.calibrated,
@@ -116,6 +151,8 @@ class Binding:
             guard=guard,
             calibration_dir=data.get("calibration_dir", ""),
             calibrated=data.get("calibrated", False),
+            _kind="arm",
+            _type_name=arm_type,
         )
 
     @classmethod
@@ -133,6 +170,8 @@ class Binding:
             interface=interface,
             guard=guard,
             slave_id=data.get("slave_id", 0),
+            _kind="hand",
+            _type_name=data["type"],
         )
 
     @classmethod
@@ -155,6 +194,8 @@ class Binding:
             spec=spec,
             interface=interface,
             guard=guard,
+            _kind="camera",
+            _type_name=spec.name,
         )
 
 

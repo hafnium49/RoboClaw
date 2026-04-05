@@ -14,6 +14,8 @@ from roboclaw.embodied.hardware.monitor import (
     check_camera_status,
 )
 from roboclaw.embodied.engine.helpers import _camera_previews_dir, group_arms
+from roboclaw.embodied.manifest import Manifest
+from roboclaw.embodied.manifest.binding import Binding
 
 if TYPE_CHECKING:
     from roboclaw.embodied.service import EmbodiedService
@@ -49,7 +51,7 @@ _ACTION_DESCRIPTIONS = {
 
 
 def _compute_readiness(
-    arms: list[dict[str, Any]],
+    arms: list[Binding],
     arm_statuses: list[ArmStatus],
     camera_statuses: list[CameraStatus],
 ) -> tuple[bool, list[str]]:
@@ -121,11 +123,10 @@ class QueryService:
 
     def get_current_config(self) -> dict[str, Any]:
         """Return current manifest config (arms, cameras, hands)."""
-        manifest = self._parent.manifest.snapshot
         return {
-            "arms": manifest.get("arms", []),
-            "cameras": manifest.get("cameras", []),
-            "hands": manifest.get("hands", []),
+            "arms": [binding.to_dict() for binding in self._parent.manifest.arms],
+            "cameras": [binding.to_dict() for binding in self._parent.manifest.cameras],
+            "hands": [binding.to_dict() for binding in self._parent.manifest.hands],
         }
 
     def get_manifest(self) -> str:
@@ -133,12 +134,11 @@ class QueryService:
 
         Same data as the web hardware-status endpoint — config + connectivity
         + calibration + readiness. Discovery of new hardware uses the separate
-        ``scan`` action (service.scanning.run_full_scan).
+        ``scan`` action (service.setup.run_full_scan).
         """
-        manifest = self._parent.manifest.snapshot
-        hw = self.get_hardware_status(manifest)
-        manifest["hardware_status"] = hw
-        return json.dumps(manifest, indent=2, ensure_ascii=False)
+        snapshot = self._parent.manifest.snapshot
+        snapshot["hardware_status"] = self.get_hardware_status(self._parent.manifest)
+        return json.dumps(snapshot, indent=2, ensure_ascii=False)
 
     def describe_actions(self, target_action: str = "") -> str:
         if not target_action:
@@ -147,10 +147,11 @@ class QueryService:
             return f"Unknown target_action: {target_action}"
         return f"{target_action}: {_ACTION_DESCRIPTIONS[target_action]}"
 
-    def list_datasets(self, manifest: dict[str, Any] | None = None) -> str:
+    def list_datasets(self, manifest: Manifest | None = None) -> str:
         if manifest is None:
-            manifest = self._parent.manifest.ensure()
-        root = Path(manifest.get("datasets", {}).get("root", "")) / "local"
+            manifest = self._parent.manifest
+            manifest.ensure()
+        root = Path(manifest.snapshot.get("datasets", {}).get("root", "")) / "local"
         if not root.exists():
             return "No datasets found."
         datasets = []
@@ -172,10 +173,11 @@ class QueryService:
             return "No datasets found."
         return json.dumps(datasets, indent=2, ensure_ascii=False)
 
-    def list_policies(self, manifest: dict[str, Any] | None = None) -> str:
+    def list_policies(self, manifest: Manifest | None = None) -> str:
         if manifest is None:
-            manifest = self._parent.manifest.ensure()
-        root = Path(manifest.get("policies", {}).get("root", ""))
+            manifest = self._parent.manifest
+            manifest.ensure()
+        root = Path(manifest.snapshot.get("policies", {}).get("root", ""))
         if not root.exists():
             return "No policies found."
         policies = []
@@ -210,11 +212,11 @@ class QueryService:
             return "No camera previews captured."
         return _previews_to_multimodal(previews, scanned_cameras)
 
-    def get_hardware_status(self, manifest: dict | None = None) -> dict[str, Any]:
+    def get_hardware_status(self, manifest: Manifest | None = None) -> dict[str, Any]:
         if manifest is None:
-            manifest = self._parent.manifest.snapshot
-        arms = manifest.get("arms", [])
-        cameras = manifest.get("cameras", [])
+            manifest = self._parent.manifest
+        arms = manifest.arms
+        cameras = manifest.cameras
         arm_statuses = [check_arm_status(a) for a in arms]
         camera_statuses = [check_camera_status(c) for c in cameras]
         ready, missing = _compute_readiness(arms, arm_statuses, camera_statuses)
@@ -230,4 +232,4 @@ class QueryService:
         if self._parent.busy:
             return {"error": "busy", "arms": {}}
         from roboclaw.embodied.hardware.motors import read_servo_positions
-        return read_servo_positions(self._parent.manifest.snapshot)
+        return read_servo_positions(self._parent.manifest.arms)

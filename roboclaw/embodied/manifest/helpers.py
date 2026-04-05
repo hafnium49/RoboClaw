@@ -86,8 +86,10 @@ def find_hand(hands: list[dict], alias: str) -> dict | None:
     return _find_by_alias(hands, alias)
 
 
-def arm_display_name(arm: dict) -> str:
+def arm_display_name(arm: Any) -> str:
     """Return user-friendly display name: the arm's alias."""
+    if hasattr(arm, "alias"):
+        return getattr(arm, "alias") or "unnamed"
     return arm.get("alias", "unnamed")
 
 
@@ -227,9 +229,12 @@ def _migrate_none_calibration_file(calibration_dir: Path, serial: str) -> None:
         legacy.rename(target)
 
 
-def load_calibration(arm: dict[str, Any]) -> dict[str, Any]:
+def load_calibration(arm: Any) -> dict[str, Any]:
     """Load calibration JSON for an arm. Returns empty dict if not found."""
-    cal_dir = arm.get("calibration_dir", "")
+    if hasattr(arm, "calibration_dir"):
+        cal_dir = getattr(arm, "calibration_dir")
+    else:
+        cal_dir = arm.get("calibration_dir", "")
     if not cal_dir:
         return {}
     serial = Path(cal_dir).name
@@ -243,13 +248,14 @@ def load_calibration(arm: dict[str, Any]) -> dict[str, Any]:
 
 
 def ensure_bimanual_cal_dir(
-    left_arm: dict[str, Any], right_arm: dict[str, Any], role: str,
+    left_arm: Any, right_arm: Any, role: str,
 ) -> str:
     """Return a persistent bimanual calibration directory, creating/refreshing if needed."""
     target_dir = get_calibration_root() / f"bimanual_{role}"
     target_dir.mkdir(parents=True, exist_ok=True)
     for side, arm in [("left", left_arm), ("right", right_arm)]:
-        cal_dir = Path(arm["calibration_dir"]).expanduser()
+        raw = arm.get("calibration_dir", "") if isinstance(arm, dict) else arm.calibration_dir
+        cal_dir = Path(raw).expanduser()
         serial = cal_dir.name
         source = cal_dir / f"{serial}.json"
         if not source.exists():
@@ -310,14 +316,16 @@ def load_manifest(path: Path | None = None) -> dict[str, Any]:
 
 
 def save_manifest(manifest: dict[str, Any], path: Path | None = None) -> None:
-    m = _lazy_manifest(path)
-    with m._lock:
-        m._data = manifest
-        m._persist()
+    _validate_manifest(manifest)
+    target = path or get_manifest_path()
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text(json.dumps(manifest, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
 
 
-def ensure_manifest(path: Path | None = None) -> dict[str, Any]:
-    return _lazy_manifest(path).ensure()
+def ensure_manifest(path: Path | None = None) -> "Manifest":
+    manifest = _lazy_manifest(path)
+    manifest.ensure()
+    return manifest
 
 
 def set_arm(alias: str, arm_type: str, port: str, *, path: Path | None = None) -> dict[str, Any]:

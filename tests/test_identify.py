@@ -1,10 +1,13 @@
 """Tests for arm identification flow."""
 
+from pathlib import Path
 from unittest.mock import AsyncMock, patch
 
 import pytest
 
 from roboclaw.embodied.interface.serial import SerialInterface
+from roboclaw.embodied.manifest import Manifest
+from roboclaw.embodied.manifest.helpers import save_manifest
 from roboclaw.embodied.tool import create_embodied_tools, EmbodiedToolGroup
 
 
@@ -26,21 +29,29 @@ def _hw_tool(tty_handoff=None) -> EmbodiedToolGroup:
     return next(t for t in tools if t.name == "embodied_hardware")
 
 
+def _manifest_from_data(tmp_path: Path, data: dict) -> Manifest:
+    path = tmp_path / "manifest.json"
+    save_manifest(data, path)
+    return Manifest(path=path)
+
+
 @pytest.mark.asyncio
-async def test_identify_no_tty() -> None:
+async def test_identify_no_tty(tmp_path: Path) -> None:
     """Identify without TTY handoff should return the no-TTY message."""
     tool = _hw_tool()  # no tty_handoff
-    with patch("roboclaw.embodied.manifest.helpers.ensure_manifest", return_value=_MOCK_SETUP):
+    manifest = _manifest_from_data(tmp_path, _MOCK_SETUP)
+    with patch("roboclaw.embodied.manifest.helpers.ensure_manifest", return_value=manifest):
         result = await tool.execute(action="identify")
     assert "local terminal" in result.lower()
 
 
 @pytest.mark.asyncio
-async def test_identify_no_ports() -> None:
+async def test_identify_no_ports(tmp_path: Path) -> None:
     """Identify with empty scanned_ports should return an error message."""
     tool = _hw_tool(tty_handoff=AsyncMock())
+    manifest = _manifest_from_data(tmp_path, _MOCK_SETUP)
     with (
-        patch("roboclaw.embodied.manifest.helpers.ensure_manifest", return_value=_MOCK_SETUP),
+        patch("roboclaw.embodied.manifest.helpers.ensure_manifest", return_value=manifest),
         patch("roboclaw.embodied.hardware.scan.scan_serial_ports", return_value=[]),
     ):
         result = await tool.execute(action="identify")
@@ -48,15 +59,16 @@ async def test_identify_no_ports() -> None:
 
 
 @pytest.mark.asyncio
-async def test_identify_success() -> None:
+async def test_identify_success(tmp_path: Path) -> None:
     """Identify with TTY and ports should run the subprocess and report success."""
     mock_handoff = AsyncMock()
     tool = _hw_tool(tty_handoff=mock_handoff)
     mock_runner = AsyncMock()
     mock_runner.run_interactive.return_value = (0, "")
 
+    manifest = _manifest_from_data(tmp_path, _MOCK_SETUP)
     with (
-        patch("roboclaw.embodied.manifest.helpers.ensure_manifest", return_value=_MOCK_SETUP),
+        patch("roboclaw.embodied.manifest.helpers.ensure_manifest", return_value=manifest),
         patch("roboclaw.embodied.hardware.scan.scan_serial_ports", return_value=_MOCK_PORTS),
         patch("roboclaw.embodied.runner.LocalLeRobotRunner", return_value=mock_runner),
     ):
@@ -69,14 +81,15 @@ async def test_identify_success() -> None:
 
 
 @pytest.mark.asyncio
-async def test_identify_failure() -> None:
+async def test_identify_failure(tmp_path: Path) -> None:
     """Identify subprocess failure should report the exit code."""
     tool = _hw_tool(tty_handoff=AsyncMock())
     mock_runner = AsyncMock()
     mock_runner.run_interactive.return_value = (1, "identify subprocess error")
 
+    manifest = _manifest_from_data(tmp_path, _MOCK_SETUP)
     with (
-        patch("roboclaw.embodied.manifest.helpers.ensure_manifest", return_value=_MOCK_SETUP),
+        patch("roboclaw.embodied.manifest.helpers.ensure_manifest", return_value=manifest),
         patch("roboclaw.embodied.hardware.scan.scan_serial_ports", return_value=_MOCK_PORTS),
         patch("roboclaw.embodied.runner.LocalLeRobotRunner", return_value=mock_runner),
     ):

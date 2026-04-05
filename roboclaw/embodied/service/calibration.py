@@ -33,6 +33,9 @@ class CalibrationService:
         await self._port_cm.__aenter__()
 
         arm = self._parent.manifest.find_arm(arm_alias)
+        if arm is None:
+            await self._cleanup()
+            raise RuntimeError(f"Arm '{arm_alias}' not found in manifest.")
         session = CalibrationSession(arm)
         try:
             await asyncio.to_thread(session.connect)

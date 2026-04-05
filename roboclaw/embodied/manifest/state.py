@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import copy
 import json
 import os
 import tempfile
@@ -19,15 +18,11 @@ from roboclaw.embodied.manifest.helpers import (
     _ARM_TYPES,
     _HAND_TYPES,
     _default_manifest,
-    _ensure_unique_port,
     _extract_serial_number,
     _has_calibration_file,
     _migrate_none_calibration_file,
     _refresh_calibration_state,
     _validate_manifest,
-    find_arm,
-    find_camera,
-    find_hand,
     get_calibration_root,
     get_manifest_path,
     refresh_bimanual_cal_dirs,
@@ -35,11 +30,7 @@ from roboclaw.embodied.manifest.helpers import (
 
 
 class Manifest:
-    """Single guardian of robot hardware configuration.
-
-    Holds manifest state in memory. All reads return deep copies (zero I/O).
-    All writes are locked, validated, atomically persisted, and emit events.
-    """
+    """Single guardian of robot hardware configuration."""
 
     def __init__(
         self,
@@ -49,38 +40,50 @@ class Manifest:
         self._path = path or get_manifest_path()
         self._bus = event_bus
         self._lock = threading.Lock()
-        self._data: dict[str, Any] = self._load()
         self._guards: dict[str, InterfaceGuard] = {}
+        self._version = 2
+        self._datasets: dict[str, Any] = {}
+        self._policies: dict[str, Any] = {}
+        self._bindings: dict[str, Binding] = {}
+        self._load()
 
     # ── Internal I/O ──────────────────────────────────────────────────
 
-    def _load(self) -> dict[str, Any]:
+    def _load(self) -> None:
         """Load from disk. Migrate setup.json -> manifest.json if needed."""
         if not self._path.exists():
             legacy = self._path.parent / "setup.json"
             if legacy.exists():
                 self._path.parent.mkdir(parents=True, exist_ok=True)
                 os.rename(str(legacy), str(self._path))
-        if not self._path.exists():
-            return _default_manifest()
-        data = json.loads(self._path.read_text(encoding="utf-8"))
-        data.pop("scanned_ports", None)
-        data.pop("scanned_cameras", None)
-        if isinstance(data.get("cameras"), dict):
-            data["cameras"] = []
-        _refresh_calibration_state(data)
-        return data
+
+        data = _default_manifest()
+        if self._path.exists():
+            data = json.loads(self._path.read_text(encoding="utf-8"))
+            data.pop("scanned_ports", None)
+            data.pop("scanned_cameras", None)
+            if isinstance(data.get("cameras"), dict):
+                data["cameras"] = []
+            _refresh_calibration_state(data)
+
+        self._version = int(data.get("version", 2))
+        self._datasets = dict(data.get("datasets", {}))
+        self._policies = dict(data.get("policies", {}))
+        self._bindings = {}
+        for kind in ("arms", "cameras", "hands"):
+            for item in data.get(kind, []):
+                binding = Binding.from_dict(item, kind[:-1], self._guards)
+                self._bindings[binding.alias] = binding
 
     def _persist(self) -> None:
         """Atomic write: tempfile + os.replace."""
-        _validate_manifest(self._data)
+        snapshot = self._snapshot_unlocked()
+        _validate_manifest(snapshot)
         self._path.parent.mkdir(parents=True, exist_ok=True)
-        tmp_fd, tmp_path = tempfile.mkstemp(
-            dir=str(self._path.parent), suffix=".tmp",
-        )
+        tmp_fd, tmp_path = tempfile.mkstemp(dir=str(self._path.parent), suffix=".tmp")
         try:
             with os.fdopen(tmp_fd, "w", encoding="utf-8") as f:
-                json.dump(self._data, f, indent=2, ensure_ascii=False)
+                json.dump(snapshot, f, indent=2, ensure_ascii=False)
                 f.write("\n")
             os.replace(tmp_path, str(self._path))
         except BaseException:
@@ -99,91 +102,115 @@ class Manifest:
             loop = asyncio.get_running_loop()
             loop.create_task(self._bus.emit(event))
         except RuntimeError:
-            pass  # no event loop running (CLI context)
+            pass
 
     def _prune_guard(self, port: str) -> None:
         """Remove guard for *port* if no other device still references it."""
         if not port:
             return
-        all_ports = {
-            d.get("port", "")
-            for lst in ("arms", "hands", "cameras")
-            for d in self._data.get(lst, [])
-        }
-        if port not in all_ports:
-            self._guards.pop(port, None)
+        if any(binding.port == port for binding in self._bindings.values()):
+            return
+        self._guards.pop(port, None)
 
-    # ── Read properties (zero I/O, return deepcopy) ───────────────────
+    def _binding_lists(self) -> dict[str, list[dict[str, Any]]]:
+        grouped = {"arms": [], "cameras": [], "hands": []}
+        for binding in self._bindings.values():
+            grouped[f"{binding.kind}s"].append(binding.to_dict())
+        return grouped
+
+    def _snapshot_unlocked(self) -> dict[str, Any]:
+        grouped = self._binding_lists()
+        return {
+            "version": self._version,
+            "arms": grouped["arms"],
+            "hands": grouped["hands"],
+            "cameras": grouped["cameras"],
+            "datasets": dict(self._datasets),
+            "policies": dict(self._policies),
+        }
+
+    def _guard_for_binding(self, interface: SerialInterface | VideoInterface) -> InterfaceGuard:
+        key = interface.stable_id
+        if not key:
+            return InterfaceGuard(interface)
+        if key not in self._guards:
+            self._guards[key] = InterfaceGuard(interface)
+        return self._guards[key]
+
+    def _require_binding(self, alias: str, kind: str) -> Binding:
+        binding = self._bindings.get(alias)
+        if binding is None or binding.kind != kind:
+            raise ValueError(f"No {kind} with alias '{alias}' in manifest.")
+        return binding
+
+    def _store_binding(self, binding: Binding) -> None:
+        existing = self._bindings.get(binding.alias)
+        if existing is not None and existing.kind != binding.kind:
+            raise ValueError(
+                f"Alias '{binding.alias}' is already assigned to {existing.kind} '{binding.alias}'."
+            )
+        self._bindings[binding.alias] = binding
+
+    # ── Read properties ───────────────────────────────────────────────
 
     @property
     def snapshot(self) -> dict[str, Any]:
         with self._lock:
-            return copy.deepcopy(self._data)
+            return self._snapshot_unlocked()
 
     @property
-    def arms(self) -> list[dict[str, Any]]:
+    def arms(self) -> list[Binding]:
         with self._lock:
-            return copy.deepcopy(self._data.get("arms", []))
+            return [binding for binding in self._bindings.values() if binding.kind == "arm"]
 
     @property
-    def cameras(self) -> list[dict[str, Any]]:
+    def cameras(self) -> list[Binding]:
         with self._lock:
-            return copy.deepcopy(self._data.get("cameras", []))
+            return [binding for binding in self._bindings.values() if binding.kind == "camera"]
 
     @property
-    def hands(self) -> list[dict[str, Any]]:
+    def hands(self) -> list[Binding]:
         with self._lock:
-            return copy.deepcopy(self._data.get("hands", []))
+            return [binding for binding in self._bindings.values() if binding.kind == "hand"]
 
     @property
     def bindings(self) -> list[Binding]:
-        """Reconstruct Binding objects from _data on demand."""
         with self._lock:
-            result: list[Binding] = []
-            for arm in self._data.get("arms", []):
-                result.append(Binding.from_dict(arm, "arm", self._guards))
-            for cam in self._data.get("cameras", []):
-                result.append(Binding.from_dict(cam, "camera", self._guards))
-            for hand in self._data.get("hands", []):
-                result.append(Binding.from_dict(hand, "hand", self._guards))
-            return result
+            return list(self._bindings.values())
 
-    def find_arm(self, alias: str) -> dict | None:
+    def find_arm(self, alias: str) -> Binding | None:
         with self._lock:
-            found = find_arm(self._data.get("arms", []), alias)
-            return copy.deepcopy(found) if found else None
+            binding = self._bindings.get(alias)
+            if binding is None or binding.kind != "arm":
+                return None
+            return binding
 
-    def find_camera(self, alias: str) -> dict | None:
+    def find_camera(self, alias: str) -> Binding | None:
         with self._lock:
-            found = find_camera(self._data.get("cameras", []), alias)
-            return copy.deepcopy(found) if found else None
+            binding = self._bindings.get(alias)
+            if binding is None or binding.kind != "camera":
+                return None
+            return binding
 
-    def find_hand(self, alias: str) -> dict | None:
+    def find_hand(self, alias: str) -> Binding | None:
         with self._lock:
-            found = find_hand(self._data.get("hands", []), alias)
-            return copy.deepcopy(found) if found else None
+            binding = self._bindings.get(alias)
+            if binding is None or binding.kind != "hand":
+                return None
+            return binding
 
     def find_binding(self, alias: str) -> Binding | None:
-        """Find a Binding by alias across arms, cameras, and hands."""
-        for b in self.bindings:
-            if b.alias == alias:
-                return b
-        return None
+        with self._lock:
+            return self._bindings.get(alias)
 
     def get_guard(self, port: str) -> InterfaceGuard | None:
-        """Get an InterfaceGuard by port/stable_id string."""
         return self._guards.get(port)
 
-    # ── Write methods (lock + validate + persist + emit) ──────────────
+    # ── Write methods ─────────────────────────────────────────────────
 
     def set_arm(
         self, alias: str, arm_type: str, interface: SerialInterface,
-    ) -> dict[str, Any]:
-        """Add or update an arm. Returns the arm entry dict.
-
-        The caller is responsible for port resolution — the interface
-        already contains a stable address.
-        """
+    ) -> Binding:
         if arm_type not in _ARM_TYPES:
             raise ValueError(f"Invalid arm_type '{arm_type}'. Must be one of {_ARM_TYPES}.")
         if not alias:
@@ -191,130 +218,130 @@ class Manifest:
         port = interface.address
         if not port:
             raise ValueError("Arm interface has no usable address.")
+
         serial = _extract_serial_number(port)
         calibration_dir = get_calibration_root() / serial
         _migrate_none_calibration_file(calibration_dir, serial)
 
+        from roboclaw.embodied.embodiment.arm.registry import get_arm_spec
+
         with self._lock:
-            arms = self._data.setdefault("arms", [])
-            _ensure_unique_port(arms, alias, port)
-            entry: dict[str, Any] = {
-                "alias": alias,
-                "type": arm_type,
-                "port": port,
-                "calibration_dir": str(calibration_dir),
-                "calibrated": _has_calibration_file(calibration_dir, serial),
-            }
-            existing = find_arm(arms, alias)
-            if existing is not None:
-                arms[arms.index(existing)] = entry
-            else:
-                arms.append(entry)
+            for binding in self._bindings.values():
+                if binding.kind != "arm":
+                    continue
+                if binding.alias != alias and binding.port == port:
+                    raise ValueError(
+                        f"Port '{port}' is already assigned to arm '{binding.alias}'."
+                    )
+            binding = Binding(
+                alias=alias,
+                spec=get_arm_spec(arm_type),
+                interface=interface,
+                guard=self._guard_for_binding(interface),
+                calibration_dir=str(calibration_dir),
+                calibrated=_has_calibration_file(calibration_dir, serial),
+                _kind="arm",
+                _type_name=arm_type,
+            )
+            self._store_binding(binding)
             self._persist()
-            result = copy.deepcopy(entry)
 
         self._emit("arm_added", alias)
-        return result
+        return binding
 
     def remove_arm(self, alias: str) -> dict[str, Any]:
-        """Remove arm by alias. Returns updated manifest dict."""
         with self._lock:
-            arms = self._data.get("arms", [])
-            arm = find_arm(arms, alias)
-            if arm is None:
-                raise ValueError(f"No arm with alias '{alias}' in manifest.")
-            port = arm.get("port", "")
-            arms.remove(arm)
+            arm = self._require_binding(alias, "arm")
+            del self._bindings[alias]
             self._persist()
-            self._prune_guard(port)
-            result = copy.deepcopy(self._data)
+            self._prune_guard(arm.port)
+            result = self._snapshot_unlocked()
 
         self._emit("arm_removed", alias)
         return result
 
     def rename_arm(self, old_alias: str, new_alias: str) -> dict[str, Any]:
-        """Rename arm. Returns updated manifest dict."""
         if not old_alias:
             raise ValueError("Old arm alias is required.")
         if not new_alias:
             raise ValueError("New arm alias is required.")
 
         with self._lock:
-            arms = self._data.get("arms", [])
-            arm = find_arm(arms, old_alias)
-            if arm is None:
-                raise ValueError(f"No arm with alias '{old_alias}' in manifest.")
-            if old_alias != new_alias and find_arm(arms, new_alias) is not None:
-                raise ValueError(f"Arm alias '{new_alias}' already exists.")
-            arm["alias"] = new_alias
+            arm = self._require_binding(old_alias, "arm")
+            existing = self._bindings.get(new_alias)
+            if old_alias != new_alias and existing is not None:
+                raise ValueError(f"Alias '{new_alias}' already exists.")
+            renamed = Binding(
+                alias=new_alias,
+                spec=arm.spec,
+                interface=arm.interface,
+                guard=arm.guard,
+                calibration_dir=arm.calibration_dir,
+                calibrated=arm.calibrated,
+                slave_id=arm.slave_id,
+                _kind=arm.kind,
+                _type_name=arm.type_name,
+            )
+            del self._bindings[old_alias]
+            self._bindings[new_alias] = renamed
             self._persist()
-            result = copy.deepcopy(self._data)
+            result = self._snapshot_unlocked()
 
         self._emit("arm_renamed", new_alias)
         return result
 
     def mark_arm_calibrated(self, alias: str) -> dict[str, Any]:
-        """Mark arm as calibrated. Returns updated manifest dict."""
         with self._lock:
-            arms = self._data.get("arms", [])
-            arm = find_arm(arms, alias)
-            if arm is None:
-                raise ValueError(f"No arm with alias '{alias}' in manifest.")
-            arm["calibrated"] = True
+            arm = self._require_binding(alias, "arm")
+            self._bindings[alias] = Binding(
+                alias=arm.alias,
+                spec=arm.spec,
+                interface=arm.interface,
+                guard=arm.guard,
+                calibration_dir=arm.calibration_dir,
+                calibrated=True,
+                slave_id=arm.slave_id,
+                _kind=arm.kind,
+                _type_name=arm.type_name,
+            )
             self._persist()
-            data_copy = copy.deepcopy(self._data)
+            result = self._snapshot_unlocked()
 
-        refresh_bimanual_cal_dirs(data_copy)
+        refresh_bimanual_cal_dirs(result)
         self._emit("arm_calibrated", alias)
-        return data_copy
+        return result
 
-    def set_camera(self, name: str, interface: VideoInterface) -> dict[str, Any]:
-        """Add/update camera. Returns the camera entry dict.
-
-        The caller is responsible for scanning — the interface already
-        contains width, height, fps, fourcc.
-        """
+    def set_camera(self, name: str, interface: VideoInterface) -> Binding:
         if not name:
             raise ValueError("Camera alias is required.")
         port = interface.address
         if not port:
             raise ValueError("Camera interface has no usable address.")
-        entry: dict[str, Any] = {
-            "alias": name,
-            "port": port,
-            "width": interface.width,
-            "height": interface.height,
-        }
-        if interface.fps:
-            entry["fps"] = interface.fps
-        if interface.fourcc:
-            entry["fourcc"] = interface.fourcc
+
+        from roboclaw.embodied.sensor.registry import get_camera_spec
 
         with self._lock:
-            cameras = self._data.setdefault("cameras", [])
-            existing = find_camera(cameras, name)
-            if existing is not None:
-                cameras[cameras.index(existing)] = entry
-            else:
-                cameras.append(entry)
+            binding = Binding(
+                alias=name,
+                spec=get_camera_spec("opencv"),
+                interface=interface,
+                guard=self._guard_for_binding(interface),
+                _kind="camera",
+                _type_name="opencv",
+            )
+            self._store_binding(binding)
             self._persist()
-            result = copy.deepcopy(entry)
 
         self._emit("camera_added", name)
-        return result
+        return binding
 
     def remove_camera(self, name: str) -> dict[str, Any]:
-        """Remove camera by alias. Returns updated manifest dict."""
         with self._lock:
-            cameras = self._data.get("cameras", [])
-            cam = find_camera(cameras, name)
-            if cam is None:
-                raise ValueError(f"No camera with alias '{name}' in manifest.")
-            port = cam.get("port", "")
-            cameras.remove(cam)
+            cam = self._require_binding(name, "camera")
+            del self._bindings[name]
             self._persist()
-            self._prune_guard(port)
-            result = copy.deepcopy(self._data)
+            self._prune_guard(cam.port)
+            result = self._snapshot_unlocked()
 
         self._emit("camera_removed", name)
         return result
@@ -322,11 +349,7 @@ class Manifest:
     def set_hand(
         self, alias: str, hand_type: str,
         interface: SerialInterface, slave_id: int,
-    ) -> dict[str, Any]:
-        """Add/update hand. Returns the hand entry dict.
-
-        The caller is responsible for port resolution and slave_id probing.
-        """
+    ) -> Binding:
         if hand_type not in _HAND_TYPES:
             raise ValueError(f"Invalid hand_type '{hand_type}'. Must be one of {_HAND_TYPES}.")
         if not alias:
@@ -335,38 +358,31 @@ class Manifest:
         if not port:
             raise ValueError("Hand interface has no usable address.")
 
-        entry: dict[str, Any] = {
-            "alias": alias,
-            "type": hand_type,
-            "port": port,
-            "slave_id": slave_id,
-        }
+        from roboclaw.embodied.embodiment.hand.registry import get_hand_spec
 
         with self._lock:
-            hands = self._data.setdefault("hands", [])
-            existing = find_hand(hands, alias)
-            if existing is not None:
-                hands[hands.index(existing)] = entry
-            else:
-                hands.append(entry)
+            binding = Binding(
+                alias=alias,
+                spec=get_hand_spec(hand_type),
+                interface=interface,
+                guard=self._guard_for_binding(interface),
+                slave_id=slave_id,
+                _kind="hand",
+                _type_name=hand_type,
+            )
+            self._store_binding(binding)
             self._persist()
-            result = copy.deepcopy(entry)
 
         self._emit("hand_added", alias)
-        return result
+        return binding
 
     def remove_hand(self, alias: str) -> dict[str, Any]:
-        """Remove hand by alias. Returns updated manifest dict."""
         with self._lock:
-            hands = self._data.get("hands", [])
-            hand = find_hand(hands, alias)
-            if hand is None:
-                raise ValueError(f"No hand with alias '{alias}' in manifest.")
-            port = hand.get("port", "")
-            hands.remove(hand)
+            hand = self._require_binding(alias, "hand")
+            del self._bindings[alias]
             self._persist()
-            self._prune_guard(port)
-            result = copy.deepcopy(self._data)
+            self._prune_guard(hand.port)
+            result = self._snapshot_unlocked()
 
         self._emit("hand_removed", alias)
         return result
@@ -374,14 +390,16 @@ class Manifest:
     # ── Lifecycle ─────────────────────────────────────────────────────
 
     def reload(self) -> None:
-        """Re-read from disk. Use after identify subprocess writes."""
         with self._lock:
-            self._data = self._load()
+            self._load()
 
     def ensure(self) -> dict[str, Any]:
-        """If manifest doesn't exist, create defaults and persist. Return snapshot."""
         with self._lock:
             if not self._path.exists():
-                self._data = _default_manifest()
+                self._version = 2
+                defaults = _default_manifest()
+                self._datasets = dict(defaults["datasets"])
+                self._policies = dict(defaults["policies"])
+                self._bindings = {}
                 self._persist()
-            return copy.deepcopy(self._data)
+            return self._snapshot_unlocked()

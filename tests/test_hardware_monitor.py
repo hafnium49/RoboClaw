@@ -13,6 +13,7 @@ from roboclaw.embodied.hardware.monitor import (
     _check_cameras,
     _fault_key,
 )
+from roboclaw.embodied.manifest.binding import Binding
 
 
 # ---------------------------------------------------------------------------
@@ -49,13 +50,27 @@ class TestHardwareFault:
 # ---------------------------------------------------------------------------
 
 class TestCheckArms:
+    @staticmethod
+    def _arm_binding(port: str, calibrated: bool) -> Binding:
+        return Binding.from_dict(
+            {
+                "alias": "follower",
+                "type": "so101_follower",
+                "port": port,
+                "calibration_dir": "/cal/follower",
+                "calibrated": calibrated,
+            },
+            "arm",
+            {},
+        )
+
     def test_no_arms(self):
         faults: list[HardwareFault] = []
         _check_arms([], time.time(), faults)
         assert faults == []
 
     def test_missing_port(self, tmp_path):
-        arms = [{"alias": "follower", "port": str(tmp_path / "nonexistent"), "calibrated": True}]
+        arms = [self._arm_binding(str(tmp_path / "nonexistent"), True)]
         faults: list[HardwareFault] = []
         _check_arms(arms, time.time(), faults)
         assert len(faults) == 1
@@ -64,7 +79,7 @@ class TestCheckArms:
     def test_port_exists_but_not_calibrated(self, tmp_path):
         port_file = tmp_path / "ttyUSB0"
         port_file.touch()
-        arms = [{"alias": "follower", "port": str(port_file), "calibrated": False}]
+        arms = [self._arm_binding(str(port_file), False)]
         faults: list[HardwareFault] = []
         _check_arms(arms, time.time(), faults)
         assert len(faults) == 1
@@ -73,21 +88,21 @@ class TestCheckArms:
     def test_port_exists_and_calibrated(self, tmp_path):
         port_file = tmp_path / "ttyUSB0"
         port_file.touch()
-        arms = [{"alias": "follower", "port": str(port_file), "calibrated": True}]
+        arms = [self._arm_binding(str(port_file), True)]
         faults: list[HardwareFault] = []
         _check_arms(arms, time.time(), faults)
         assert faults == []
 
     def test_missing_port_skips_calibration_check(self, tmp_path):
         """If port is missing, only ARM_DISCONNECTED is reported (not also uncalibrated)."""
-        arms = [{"alias": "follower", "port": str(tmp_path / "gone"), "calibrated": False}]
+        arms = [self._arm_binding(str(tmp_path / "gone"), False)]
         faults: list[HardwareFault] = []
         _check_arms(arms, time.time(), faults)
         assert len(faults) == 1
         assert faults[0].fault_type == FaultType.ARM_DISCONNECTED
 
     def test_empty_port_no_fault(self):
-        arms = [{"alias": "follower", "port": "", "calibrated": True}]
+        arms = [self._arm_binding("", True)]
         faults: list[HardwareFault] = []
         _check_arms(arms, time.time(), faults)
         assert faults == []
@@ -98,13 +113,21 @@ class TestCheckArms:
 # ---------------------------------------------------------------------------
 
 class TestCheckCameras:
+    @staticmethod
+    def _camera_binding(port: str) -> Binding:
+        return Binding.from_dict(
+            {"alias": "wrist_cam", "port": port, "width": 640, "height": 480},
+            "camera",
+            {},
+        )
+
     def test_no_cameras(self):
         faults: list[HardwareFault] = []
         _check_cameras([], time.time(), faults, recording_active=False)
         assert faults == []
 
     def test_missing_camera_port(self, tmp_path):
-        cams = [{"alias": "wrist_cam", "port": str(tmp_path / "video0")}]
+        cams = [self._camera_binding(str(tmp_path / "video0"))]
         faults: list[HardwareFault] = []
         _check_cameras(cams, time.time(), faults, recording_active=False)
         assert len(faults) == 1
@@ -113,19 +136,19 @@ class TestCheckCameras:
     def test_camera_exists(self, tmp_path):
         port_file = tmp_path / "video0"
         port_file.touch()
-        cams = [{"alias": "wrist_cam", "port": str(port_file)}]
+        cams = [self._camera_binding(str(port_file))]
         faults: list[HardwareFault] = []
         _check_cameras(cams, time.time(), faults, recording_active=False)
         assert faults == []
 
     def test_skip_during_recording(self, tmp_path):
-        cams = [{"alias": "wrist_cam", "port": str(tmp_path / "gone")}]
+        cams = [self._camera_binding(str(tmp_path / "gone"))]
         faults: list[HardwareFault] = []
         _check_cameras(cams, time.time(), faults, recording_active=True)
         assert faults == []
 
     def test_empty_port_no_fault(self):
-        cams = [{"alias": "cam", "port": ""}]
+        cams = [Binding.from_dict({"alias": "cam", "port": "", "width": 640, "height": 480}, "camera", {})]
         faults: list[HardwareFault] = []
         _check_cameras(cams, time.time(), faults, recording_active=False)
         assert faults == []

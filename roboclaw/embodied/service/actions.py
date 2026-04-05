@@ -30,18 +30,20 @@ from roboclaw.embodied.engine.helpers import (
     dataset_path,
     group_arms,
 )
+from roboclaw.embodied.manifest import Manifest
+from roboclaw.embodied.manifest.binding import Binding
 from roboclaw.embodied.sensor.camera import resolve_cameras
 
 
-async def do_doctor(manifest: dict[str, Any], kwargs: dict[str, Any], tty_handoff: Any) -> str:
+async def do_doctor(manifest: Manifest, kwargs: dict[str, Any], tty_handoff: Any) -> str:
     from roboclaw.embodied.engine.command_builder import ArmCommandBuilder
     from roboclaw.embodied.runner import LocalLeRobotRunner
 
     result = await _run(LocalLeRobotRunner(), ArmCommandBuilder().doctor())
-    return result + f"\n\nCurrent setup:\n{json.dumps(manifest, indent=2, ensure_ascii=False)}"
+    return result + f"\n\nCurrent setup:\n{json.dumps(manifest.snapshot, indent=2, ensure_ascii=False)}"
 
 
-async def do_identify(manifest: dict[str, Any], kwargs: dict[str, Any], tty_handoff: Any) -> str:
+async def do_identify(manifest: Manifest, kwargs: dict[str, Any], tty_handoff: Any) -> str:
     from roboclaw.embodied.runner import LocalLeRobotRunner
     from roboclaw.embodied.hardware.scan import scan_serial_ports
 
@@ -58,13 +60,13 @@ async def do_identify(manifest: dict[str, Any], kwargs: dict[str, Any], tty_hand
     return _format_tty_failure("Arm identification failed", rc, stderr_text)
 
 
-def _sync_calibration_to_motors(arm: dict[str, Any]) -> None:
+def _sync_calibration_to_motors(arm: Binding) -> None:
     """Write calibration values from file to motor EEPROM.
 
     Best-effort: failures are logged but never block the calibration result.
     Uses the arm spec registry to pick the correct motor bus and models.
     """
-    cal_dir = arm.get("calibration_dir", "")
+    cal_dir = arm.calibration_dir
     serial = Path(cal_dir).name
     cal_path = Path(cal_dir) / f"{serial}.json"
     if not cal_path.exists():
@@ -77,8 +79,8 @@ def _sync_calibration_to_motors(arm: dict[str, Any]) -> None:
 
     from roboclaw.embodied.embodiment.arm.registry import get_arm_spec, get_role
 
-    spec = get_arm_spec(arm["type"])
-    role = get_role(arm["type"])
+    spec = get_arm_spec(arm.type_name)
+    role = get_role(arm.type_name)
     model_map = spec.motor_models(role)
     cal = json.loads(cal_path.read_text())
 
@@ -96,7 +98,7 @@ def _sync_calibration_to_motors(arm: dict[str, Any]) -> None:
     mod = importlib.import_module(spec.motor_bus_module)
     BusClass = getattr(mod, spec.motor_bus_class)
 
-    bus = BusClass(port=arm["port"], motors=motors, calibration=calibration)
+    bus = BusClass(port=arm.port, motors=motors, calibration=calibration)
     try:
         bus.connect()
         for name, cfg in cal.items():
@@ -104,21 +106,20 @@ def _sync_calibration_to_motors(arm: dict[str, Any]) -> None:
             bus.write("Min_Position_Limit", name, cfg["range_min"], normalize=False)
             bus.write("Max_Position_Limit", name, cfg["range_max"], normalize=False)
     except (OSError, ConnectionError):
-        logger.debug("Motor EEPROM sync failed for %s", arm.get("alias", "?"))
+        logger.debug("Motor EEPROM sync failed for %s", arm.alias)
     finally:
         bus.disconnect()
 
 
-async def do_calibrate(manifest: dict[str, Any], kwargs: dict[str, Any], tty_handoff: Any) -> str:
+async def do_calibrate(manifest: Manifest, kwargs: dict[str, Any], tty_handoff: Any) -> str:
     from roboclaw.embodied.manifest.helpers import arm_display_name
-    from roboclaw.embodied.manifest.helpers import mark_arm_calibrated
     from roboclaw.embodied.runner import LocalLeRobotRunner
 
-    configured = manifest.get("arms", [])
+    configured = manifest.arms
     if not configured:
         return "No arms configured."
     selected = _resolve_action_arms(manifest, kwargs)
-    targets = selected if kwargs.get("arms", "") else [a for a in selected if not a.get("calibrated")]
+    targets = selected if kwargs.get("arms", "") else [a for a in selected if not a.calibrated]
     if not targets:
         return "All arms are already calibrated."
     if not tty_handoff:
@@ -131,14 +132,14 @@ async def do_calibrate(manifest: dict[str, Any], kwargs: dict[str, Any], tty_han
     for arm in targets:
         display = arm_display_name(arm)
         argv = controller.calibrate(
-            arm["type"], arm["port"], arm.get("calibration_dir", ""), _arm_id(arm),
+            arm.type_name, arm.port, arm.calibration_dir, _arm_id(arm),
         )
         rc, stderr_text = await _run_tty(tty_handoff, runner, argv, f"Calibrating: {display}")
         if _is_interrupted(rc):
             return "interrupted"
         if rc == 0:
             succeeded += 1
-            mark_arm_calibrated(arm["alias"])
+            manifest.mark_arm_calibrated(arm.alias)
             _sync_calibration_to_motors(arm)
             results.append(f"{display}: OK")
             continue
@@ -168,7 +169,7 @@ def _should_resume(user_specified: bool, dataset_root: Path) -> bool:
     return user_specified and dataset_root.exists()
 
 
-async def do_run_policy(manifest: dict[str, Any], kwargs: dict[str, Any], tty_handoff: Any) -> str:
+async def do_run_policy(manifest: Manifest, kwargs: dict[str, Any], tty_handoff: Any) -> str:
     from roboclaw.embodied.learning.act import ACTPipeline
     from roboclaw.embodied.runner import LocalLeRobotRunner
 
@@ -178,8 +179,8 @@ async def do_run_policy(manifest: dict[str, Any], kwargs: dict[str, Any], tty_ha
         return "No follower arm configured."
     if len(followers) not in {1, 2}:
         return f"Unsupported follower arm count: {len(followers)}. Use 1 (single) or 2 (bimanual)."
-    cameras = {} if kwargs.get("use_cameras") is False else resolve_cameras(manifest)
-    policies_root = manifest.get("policies", {}).get("root", "")
+    cameras = {} if kwargs.get("use_cameras") is False else resolve_cameras(manifest.cameras)
+    policies_root = manifest.snapshot.get("policies", {}).get("root", "")
     checkpoint = kwargs.get("checkpoint_path")
     if not checkpoint:
         source_dataset = kwargs.get("source_dataset", kwargs.get("dataset_name", ""))
@@ -208,9 +209,9 @@ async def do_run_policy(manifest: dict[str, Any], kwargs: dict[str, Any], tty_ha
     if len(followers) == 1:
         follower = followers[0]
         argv = controller.run_policy(
-            robot_type=follower["type"],
-            robot_port=follower["port"],
-            robot_cal_dir=follower["calibration_dir"],
+            robot_type=follower.type_name,
+            robot_port=follower.port,
+            robot_cal_dir=follower.calibration_dir,
             robot_id=_arm_id(follower),
             **policy_kwargs,
         )
@@ -227,7 +228,7 @@ async def do_run_policy(manifest: dict[str, Any], kwargs: dict[str, Any], tty_ha
     return await _run(LocalLeRobotRunner(), argv)
 
 
-async def do_replay(manifest: dict[str, Any], kwargs: dict[str, Any], tty_handoff: Any) -> str:
+async def do_replay(manifest: Manifest, kwargs: dict[str, Any], tty_handoff: Any) -> str:
     if not tty_handoff:
         return _NO_TTY_MSG
     selected = _resolve_action_arms(manifest, kwargs)
@@ -253,16 +254,16 @@ async def do_replay(manifest: dict[str, Any], kwargs: dict[str, Any], tty_handof
 
 
 async def _replay_single(
-    controller: Any, follower: dict,
+    controller: Any, follower: Binding,
     dataset_name: str, dataset_root: Path, episode: int, fps: int,
     tty_handoff: Any,
 ) -> str:
     from roboclaw.embodied.runner import LocalLeRobotRunner
 
     argv = controller.replay(
-        robot_type=follower["type"],
-        robot_port=follower["port"],
-        robot_cal_dir=follower["calibration_dir"],
+        robot_type=follower.type_name,
+        robot_port=follower.port,
+        robot_cal_dir=follower.calibration_dir,
         robot_id=_arm_id(follower),
         repo_id=f"local/{dataset_name}",
         dataset_root=str(dataset_root),
@@ -278,7 +279,7 @@ async def _replay_single(
 
 
 async def _replay_bimanual(
-    controller: Any, followers: list[dict],
+    controller: Any, followers: list[Binding],
     dataset_name: str, dataset_root: Path, episode: int, fps: int,
     tty_handoff: Any,
 ) -> str:
@@ -306,7 +307,7 @@ async def _replay_bimanual(
     return _format_tty_failure("Replay failed", rc, stderr_text)
 
 
-async def do_train(manifest: dict[str, Any], kwargs: dict[str, Any], tty_handoff: Any) -> str:
+async def do_train(manifest: Manifest, kwargs: dict[str, Any], tty_handoff: Any) -> str:
     from roboclaw.embodied.learning.act import ACTPipeline
     from roboclaw.embodied.runner import LocalLeRobotRunner
 
@@ -315,7 +316,7 @@ async def do_train(manifest: dict[str, Any], kwargs: dict[str, Any], tty_handoff
     if error:
         return error
     ds_root = dataset_path(manifest, dataset_name)
-    policies_root = manifest.get("policies", {}).get("root", "")
+    policies_root = manifest.snapshot.get("policies", {}).get("root", "")
     output_dir = Path(policies_root).expanduser() / dataset_name
     resume = output_dir.is_dir()
     argv = ACTPipeline().train(
@@ -330,7 +331,7 @@ async def do_train(manifest: dict[str, Any], kwargs: dict[str, Any], tty_handoff
     return f"Training started. Job ID: {job_id}"
 
 
-async def do_job_status(manifest: dict[str, Any], kwargs: dict[str, Any], tty_handoff: Any) -> str:
+async def do_job_status(manifest: Manifest, kwargs: dict[str, Any], tty_handoff: Any) -> str:
     from roboclaw.embodied.runner import LocalLeRobotRunner
 
     job_id = kwargs.get("job_id", "")
@@ -338,16 +339,15 @@ async def do_job_status(manifest: dict[str, Any], kwargs: dict[str, Any], tty_ha
     return "\n".join(f"{key}: {value}" for key, value in status.items())
 
 
-def _resolve_hand(manifest: dict[str, Any], hand_name: str) -> dict:
+def _resolve_hand(manifest: Manifest, hand_name: str) -> Binding:
     from roboclaw.embodied.engine.helpers import ActionError
-    from roboclaw.embodied.manifest.helpers import find_hand
 
-    hands = manifest.get("hands", [])
+    hands = manifest.hands
     if not hands:
         raise ActionError("No hand configured. Use set_hand to add one.")
     if not hand_name:
         return hands[0]
-    hand = find_hand(hands, hand_name)
+    hand = manifest.find_hand(hand_name)
     if hand is None:
         raise ActionError(f"No hand named '{hand_name}' in manifest.")
     return hand
@@ -363,30 +363,30 @@ def _get_hand_controller(hand_type: str):
     return getattr(mod, spec.controller_class)()
 
 
-async def _run_hand_method(method_name: str, manifest: dict[str, Any], kwargs: dict[str, Any], extra_args=()):
+async def _run_hand_method(method_name: str, manifest: Manifest, kwargs: dict[str, Any], extra_args=()):
     hand = _resolve_hand(manifest, kwargs.get("hand_name", ""))
-    slave_id = hand["slave_id"]
-    controller = _get_hand_controller(hand["type"])
+    slave_id = hand.slave_id
+    controller = _get_hand_controller(hand.type_name)
     method = getattr(controller, method_name)
     if asyncio.iscoroutinefunction(method):
-        return await method(hand["port"], *extra_args, slave_id)
-    return await asyncio.to_thread(method, hand["port"], *extra_args, slave_id)
+        return await method(hand.port, *extra_args, slave_id)
+    return await asyncio.to_thread(method, hand.port, *extra_args, slave_id)
 
 
-async def do_hand_open(manifest: dict[str, Any], kwargs: dict[str, Any], tty_handoff: Any) -> str:
+async def do_hand_open(manifest: Manifest, kwargs: dict[str, Any], tty_handoff: Any) -> str:
     return await _run_hand_method("open_hand", manifest, kwargs)
 
 
-async def do_hand_close(manifest: dict[str, Any], kwargs: dict[str, Any], tty_handoff: Any) -> str:
+async def do_hand_close(manifest: Manifest, kwargs: dict[str, Any], tty_handoff: Any) -> str:
     return await _run_hand_method("close_hand", manifest, kwargs)
 
 
-async def do_hand_pose(manifest: dict[str, Any], kwargs: dict[str, Any], tty_handoff: Any) -> str:
+async def do_hand_pose(manifest: Manifest, kwargs: dict[str, Any], tty_handoff: Any) -> str:
     positions = kwargs.get("positions")
     if not positions:
         return "hand_pose requires positions (6 integers 0-1000)."
     return await _run_hand_method("set_pose", manifest, kwargs, extra_args=(positions,))
 
 
-async def do_hand_status(manifest: dict[str, Any], kwargs: dict[str, Any], tty_handoff: Any) -> str:
+async def do_hand_status(manifest: Manifest, kwargs: dict[str, Any], tty_handoff: Any) -> str:
     return await _run_hand_method("get_status", manifest, kwargs)

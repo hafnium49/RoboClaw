@@ -16,6 +16,7 @@ from typing import Any
 from loguru import logger
 
 from roboclaw.embodied.events import EventBus, FaultDetectedEvent, FaultResolvedEvent
+from roboclaw.embodied.manifest.binding import Binding
 
 _CHECK_INTERVAL_SECONDS = 5
 
@@ -72,25 +73,23 @@ class CameraStatus:
         return asdict(self)
 
 
-def check_arm_status(arm: dict[str, Any]) -> ArmStatus:
+def check_arm_status(arm: Binding) -> ArmStatus:
     """Check a single arm's connectivity and calibration state."""
-    alias = arm.get("alias", "unknown")
-    port = arm.get("port", "")
-    connected = bool(port and Path(port).exists())
-    calibrated = bool(arm.get("calibrated", False))
-    arm_type = arm.get("type", "")
-    role = "follower" if "follower" in arm_type else "leader" if "leader" in arm_type else ""
+    alias = arm.alias
+    connected = bool(arm.port and Path(arm.port).exists())
+    calibrated = arm.calibrated
+    arm_type = arm.type_name
+    role = "follower" if arm.is_follower else "leader" if arm.is_leader else ""
     return ArmStatus(alias=alias, arm_type=arm_type, role=role, connected=connected, calibrated=calibrated)
 
 
-def check_camera_status(cam: dict[str, Any]) -> CameraStatus:
+def check_camera_status(cam: Binding) -> CameraStatus:
     """Check a single camera's connectivity."""
-    alias = cam.get("alias", "unknown")
-    port = cam.get("port", "")
-    connected = bool(port and Path(port).exists())
+    alias = cam.alias
+    connected = bool(cam.port and Path(cam.port).exists())
     return CameraStatus(
         alias=alias, connected=connected,
-        width=cam.get("width", 640), height=cam.get("height", 480),
+        width=cam.interface.width, height=cam.interface.height,
     )
 
 
@@ -168,24 +167,27 @@ class HardwareMonitor:
     def check_hardware(self) -> list[HardwareFault]:
         """Check all configured devices and return current faults."""
         if self._manifest is not None:
-            manifest = self._manifest.snapshot
+            arms = self._manifest.arms
+            cameras = self._manifest.cameras
         else:
-            from roboclaw.embodied.manifest.helpers import load_manifest
-            manifest = load_manifest()
+            from roboclaw.embodied.manifest import Manifest
+            manifest = Manifest()
+            arms = manifest.arms
+            cameras = manifest.cameras
         now = time.time()
         faults: list[HardwareFault] = []
-        _check_arms(manifest.get("arms", []), now, faults)
-        _check_cameras(manifest.get("cameras", []), now, faults, self._recording_active)
+        _check_arms(arms, now, faults)
+        _check_cameras(cameras, now, faults, self._recording_active)
         return faults
 
 
 def _check_arms(
-    arms: list[dict[str, Any]], now: float, faults: list[HardwareFault],
+    arms: list[Binding], now: float, faults: list[HardwareFault],
 ) -> None:
     """Check arm connectivity and calibration state."""
     for arm in arms:
         status = check_arm_status(arm)
-        if arm.get("port") and not status.connected:
+        if arm.port and not status.connected:
             faults.append(HardwareFault(
                 fault_type=FaultType.ARM_DISCONNECTED,
                 device_alias=status.alias,
@@ -203,7 +205,7 @@ def _check_arms(
 
 
 def _check_cameras(
-    cameras: list[dict[str, Any]],
+    cameras: list[Binding],
     now: float,
     faults: list[HardwareFault],
     recording_active: bool,
@@ -213,12 +215,11 @@ def _check_cameras(
         return
     for cam in cameras:
         status = check_camera_status(cam)
-        if cam.get("port") and not status.connected:
+        if cam.port and not status.connected:
             faults.append(HardwareFault(
                 fault_type=FaultType.CAMERA_DISCONNECTED,
                 device_alias=status.alias,
                 message=f"Camera '{status.alias}' device not found",
                 timestamp=now,
             ))
-
 

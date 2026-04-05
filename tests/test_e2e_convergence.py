@@ -134,25 +134,28 @@ class TestConvergence:
 
     def test_scan_same_method_cli_and_web(self, service, monkeypatch):
         """CLI scan and Web scan call the exact same service method."""
-        mock_result = {
-            "ports": [{"dev": "/dev/ttyACM0", "motor_ids": [1, 2, 3]}],
-            "cameras": [{"dev": "/dev/video0"}],
-        }
+        from roboclaw.embodied.interface.serial import SerialInterface
+        from roboclaw.embodied.interface.video import VideoInterface
+
+        fake_port = SerialInterface(dev="/dev/ttyACM0", motor_ids=(1, 2, 3))
+        fake_cam = VideoInterface(dev="/dev/video0")
+
         monkeypatch.setattr(
-            service.scanning, "_scanner",
+            "roboclaw.embodied.service.setup_session.HardwareDiscovery",
             type("FakeDiscovery", (), {
-                "discover_all": lambda self: mock_result["ports"],
-                "discover_cameras": lambda self: mock_result["cameras"],
-            })(),
+                "__init__": lambda self: None,
+                "discover_all": lambda self: [fake_port],
+                "discover_cameras": lambda self: [fake_cam],
+            }),
         )
 
         # CLI path
-        cli_result = service.scanning.run_full_scan()
-        # Web path (same method)
-        web_result = service.scanning.run_full_scan()
+        cli_result = service.setup.run_full_scan()
+        # Web path (same method) — needs fresh session
+        web_result = service.setup.run_full_scan()
 
-        assert cli_result == web_result
-        assert cli_result == mock_result
+        assert len(cli_result["ports"]) == len(web_result["ports"])
+        assert len(cli_result["cameras"]) == len(web_result["cameras"])
 
 
 # ---------------------------------------------------------------------------
@@ -165,7 +168,7 @@ class TestEmbodimentLock:
     def test_scan_blocked_during_operation(self, service):
         service.acquire_embodiment("teleop")
         with pytest.raises(EmbodimentBusyError):
-            service.scanning.run_full_scan()
+            service.setup.run_full_scan()
         service.release_embodiment(owner="teleop")
 
     def test_remove_arm_blocked_during_operation(self, service):

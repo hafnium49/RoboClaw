@@ -49,10 +49,11 @@ def _list_serial_ports() -> list[str]:
             if getattr(port, "device", "")
         )
 
-    # Only scan actual USB serial devices, not virtual consoles
     return sorted(
-        glob.glob("/dev/ttyACM*") + glob.glob("/dev/ttyUSB*")
-        + glob.glob("/dev/tty.usb*") + glob.glob("/dev/cu.usb*")
+        {
+            *(str(path) for path in Path("/dev").glob("tty*")),
+            *(str(path) for path in Path("/dev").glob("cu.*")),
+        }
     )
 
 

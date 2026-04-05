@@ -83,7 +83,7 @@ def _format_status_line(status: dict[str, Any]) -> str:
 async def run_cli_session(
     service: Any,
     action: str,
-    manifest: dict[str, Any],
+    manifest: Any,
     kwargs: dict[str, Any],
     tty_handoff: Any,
 ) -> str:
@@ -96,8 +96,8 @@ async def run_cli_session(
     action:
         "teleoperate" or "record".
     manifest:
-        Current hardware manifest dict (unused directly; OperationEngine loads
-        its own via load_manifest).
+        Current hardware manifest object (unused directly; OperationEngine uses
+        the service-owned manifest).
     kwargs:
         Action-specific keyword args (fps, task, num_episodes, etc.).
     tty_handoff:

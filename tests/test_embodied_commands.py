@@ -5,6 +5,7 @@ import sys
 from roboclaw.embodied.engine.command_builder import ArmCommandBuilder
 from roboclaw.embodied.embodiment.arm.registry import SO101
 from roboclaw.embodied.learning.act import ACTPipeline
+from roboclaw.embodied.manifest.binding import Binding
 
 
 def _builder() -> ArmCommandBuilder:
@@ -13,6 +14,20 @@ def _builder() -> ArmCommandBuilder:
 
 def _bimanual_builder() -> ArmCommandBuilder:
     return ArmCommandBuilder(spec=SO101)
+
+
+def _arm_binding(port: str) -> Binding:
+    return Binding.from_dict(
+        {
+            "alias": port.rsplit("/", 1)[-1],
+            "type": "so101_follower",
+            "port": port,
+            "calibration_dir": f"/cal/{port.rsplit('/', 1)[-1]}",
+            "calibrated": True,
+        },
+        "arm",
+        {},
+    )
 
 
 def test_doctor_command() -> None:
@@ -82,12 +97,12 @@ def test_teleoperate_bimanual() -> None:
     argv = _bimanual_builder().teleoperate_bimanual(
         robot_id="bimanual",
         robot_cal_dir="/cal/robot",
-        left_robot={"port": "/dev/a"},
-        right_robot={"port": "/dev/b"},
+        left_robot=_arm_binding("/dev/a"),
+        right_robot=_arm_binding("/dev/b"),
         teleop_id="bimanual",
         teleop_cal_dir="/cal/teleop",
-        left_teleop={"port": "/dev/c"},
-        right_teleop={"port": "/dev/d"},
+        left_teleop=_arm_binding("/dev/c"),
+        right_teleop=_arm_binding("/dev/d"),
     )
     assert argv[:4] == [sys.executable, "-m", "roboclaw.embodied.lerobot_wrapper", "teleoperate"]
     assert "--robot.type=bi_so_follower" in argv
@@ -180,12 +195,12 @@ def test_record_bimanual_uses_per_arm_cameras() -> None:
     argv = _bimanual_builder().record_bimanual(
         robot_id="bimanual",
         robot_cal_dir="/cal/robot",
-        left_robot={"port": "/dev/a"},
-        right_robot={"port": "/dev/b"},
+        left_robot=_arm_binding("/dev/a"),
+        right_robot=_arm_binding("/dev/b"),
         teleop_id="bimanual",
         teleop_cal_dir="/cal/teleop",
-        left_teleop={"port": "/dev/c"},
-        right_teleop={"port": "/dev/d"},
+        left_teleop=_arm_binding("/dev/c"),
+        right_teleop=_arm_binding("/dev/d"),
         cameras=cameras,
         repo_id="local/test_data",
         task="pick and place",
@@ -224,8 +239,8 @@ def test_replay_bimanual() -> None:
     argv = _bimanual_builder().replay_bimanual(
         robot_id="bimanual",
         robot_cal_dir="/cal/robot",
-        left_robot={"port": "/dev/a"},
-        right_robot={"port": "/dev/b"},
+        left_robot=_arm_binding("/dev/a"),
+        right_robot=_arm_binding("/dev/b"),
         repo_id="local/test_data",
         dataset_root="/data",
         episode=1,
@@ -263,8 +278,8 @@ def test_run_policy_bimanual() -> None:
     argv = _bimanual_builder().run_policy_bimanual(
         robot_id="bimanual",
         robot_cal_dir="/cal/robot",
-        left_robot={"port": "/dev/a"},
-        right_robot={"port": "/dev/b"},
+        left_robot=_arm_binding("/dev/a"),
+        right_robot=_arm_binding("/dev/b"),
         cameras=cameras,
         policy_path="/models/act_checkpoint",
     )

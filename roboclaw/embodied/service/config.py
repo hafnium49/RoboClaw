@@ -3,15 +3,12 @@
 from __future__ import annotations
 
 import json
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 from roboclaw.embodied.manifest.helpers import (
     _probe_hand_slave_id,
     _resolve_serial_interface,
     arm_display_name,
-    find_arm,
-    find_camera,
-    find_hand,
 )
 
 if TYPE_CHECKING:
@@ -31,14 +28,17 @@ class ConfigService:
         self._parent.manifest.set_arm(alias, arm_type, interface)
         arm = self._parent.manifest.find_arm(alias)
         display = arm_display_name(arm)
-        return f"Arm '{display}' configured.\n{json.dumps(arm, indent=2)}"
+        return f"Arm '{display}' configured.\n{json.dumps(arm.to_dict(), indent=2)}"
 
     def rename_arm(self, old_alias: str, new_alias: str) -> str:
         if not old_alias or not new_alias:
             return "rename_arm requires alias and new_alias."
         self._parent.manifest.rename_arm(old_alias, new_alias)
         arm = self._parent.manifest.find_arm(new_alias)
-        return f"Arm renamed from '{old_alias}' to '{new_alias}'.\n{json.dumps(arm, indent=2)}"
+        return (
+            f"Arm renamed from '{old_alias}' to '{new_alias}'.\n"
+            f"{json.dumps(arm.to_dict(), indent=2)}"
+        )
 
     def remove_arm(self, alias: str) -> str:
         if not alias:
@@ -64,7 +64,7 @@ class ConfigService:
             return f"Scanned camera at index {camera_index} has no usable path."
         self._parent.manifest.set_camera(camera_name, interface)
         cam = self._parent.manifest.find_camera(camera_name)
-        return f"Camera '{camera_name}' configured.\n{json.dumps(cam, indent=2)}"
+        return f"Camera '{camera_name}' configured.\n{json.dumps(cam.to_dict(), indent=2)}"
 
     def remove_camera(self, camera_name: str) -> str:
         if not camera_name:
@@ -81,7 +81,7 @@ class ConfigService:
         slave_id = _probe_hand_slave_id(hand_type, interface.address)
         self._parent.manifest.set_hand(alias, hand_type, interface, slave_id)
         hand = self._parent.manifest.find_hand(alias)
-        return f"Hand '{alias}' configured.\n{json.dumps(hand, indent=2)}"
+        return f"Hand '{alias}' configured.\n{json.dumps(hand.to_dict(), indent=2)}"
 
     def remove_hand(self, alias: str) -> str:
         if not alias:

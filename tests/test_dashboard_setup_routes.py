@@ -66,7 +66,7 @@ def _make_app(session_busy: bool = False) -> FastAPI:
     svc.busy = session_busy
 
     scanner = HardwareDiscovery()
-    scanning = MagicMock()
+    setup = MagicMock()
 
     def _run_full_scan(model=""):
         return {
@@ -74,19 +74,20 @@ def _make_app(session_busy: bool = False) -> FastAPI:
             "cameras": scanner.discover_cameras(),
         }
 
-    scanning.run_full_scan = _run_full_scan
-    scanning.capture_previews = scanner.capture_camera_previews
-    scanning.start_motion_detection = scanner.start_motion_detection
-    scanning.poll_motion = scanner.poll_motion
-    scanning.stop_motion_detection = MagicMock(side_effect=lambda: scanner.stop_motion_detection())
+    setup.run_full_scan = _run_full_scan
+    setup.capture_previews = scanner.capture_camera_previews
+    setup.start_motion_detection = scanner.start_motion_detection
+    setup.poll_motion = scanner.poll_motion
+    setup.stop_motion_detection = MagicMock(side_effect=lambda: scanner.stop_motion_detection())
+    setup.to_dict = MagicMock(return_value={"phase": "idle"})
 
     if session_busy:
         from roboclaw.embodied.service import EmbodimentBusyError
-        scanning.run_full_scan = MagicMock(
+        setup.run_full_scan = MagicMock(
             side_effect=EmbodimentBusyError("Embodiment busy: recording"),
         )
 
-    svc.scanning = scanning
+    svc.setup = setup
 
     svc.config = MagicMock()
     svc.queries = MagicMock()
@@ -162,7 +163,7 @@ def test_motion_stop_clears_state() -> None:
     assert resp.status_code == 200
     assert resp.json()["status"] == "stopped"
     assert app.state.setup_wizard.motion_active is False
-    assert app.state.embodied_service.scanning.stop_motion_detection.called
+    assert app.state.embodied_service.setup.stop_motion_detection.called
 
 
 def test_add_arm() -> None:

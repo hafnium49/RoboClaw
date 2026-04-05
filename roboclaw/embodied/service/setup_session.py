@@ -1,17 +1,21 @@
-"""SetupSession — stateful configuration workflow for hardware setup.
+"""SetupSession — stateful setup workflow, sub-service of EmbodiedService.
 
 Drives the discover → identify → assign → commit workflow.
+Replaces ScanningService — owns embodiment locking for scan/motion operations.
 Shared by CLI agent and Web UI.
 """
 from __future__ import annotations
 
 from dataclasses import dataclass
 from enum import Enum
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from roboclaw.embodied.hardware.discovery import HardwareDiscovery
 from roboclaw.embodied.hardware.scan import restore_stderr, suppress_stderr
 from roboclaw.embodied.interface import Interface, SerialInterface, VideoInterface
+
+if TYPE_CHECKING:
+    from roboclaw.embodied.service import EmbodiedService
 
 
 class SetupPhase(str, Enum):
@@ -29,21 +33,31 @@ class Assignment:
     alias: str
     spec_name: str  # e.g. "so101_follower", "inspire_rh56", "opencv"
     interface: Interface
+    slave_id: int = 0  # hand-specific, set during assign if needed
 
 
 class SetupSession:
-    """Drives the discover → identify → assign → commit workflow."""
+    """Drives the discover → identify → assign → commit workflow.
 
-    def __init__(self, model: str = "") -> None:
-        self._model = model
+    This is a direct sub-service of EmbodiedService, replacing ScanningService.
+    It manages embodiment locking internally.
+    """
+
+    def __init__(self, parent: EmbodiedService) -> None:
+        self._parent = parent
         self._phase = SetupPhase.IDLE
-        self._discovery = HardwareDiscovery()
+        self._model: str = ""
+        self._discovery: HardwareDiscovery | None = None
         self._candidates: list[SerialInterface | VideoInterface] = []
         self._assignments: list[Assignment] = []
 
     @property
     def phase(self) -> SetupPhase:
         return self._phase
+
+    @property
+    def motion_active(self) -> bool:
+        return self._phase == SetupPhase.IDENTIFYING
 
     @property
     def candidates(self) -> list[SerialInterface | VideoInterface]:
@@ -58,29 +72,61 @@ class SetupSession:
         assigned_ids = {a.interface.stable_id for a in self._assignments}
         return [c for c in self._candidates if c.stable_id not in assigned_ids]
 
-    def discover(self) -> list[SerialInterface | VideoInterface]:
-        """Scan hardware, populate candidates.
+    # -- Scan ----------------------------------------------------------------
 
-        Transitions: IDLE → ASSIGNING.
+    def run_full_scan(self, model: str = "") -> dict[str, Any]:
+        """Scan ports + cameras. Resets session state.
+
+        Acquires/releases embodiment lock during scan.
+        Returns {ports: list[SerialInterface], cameras: list[VideoInterface]}.
         """
-        self._require_phase(SetupPhase.IDLE)
-        self._phase = SetupPhase.DISCOVERING
-        if self._model:
-            serial = self._discovery.discover(self._model)
-        else:
-            serial = self._discovery.discover_all()
-        video = self._discovery.discover_cameras()
-        self._candidates = [*serial, *video]
-        self._phase = SetupPhase.ASSIGNING
-        return list(self._candidates)
+        self._parent.acquire_embodiment("scanning")
+        try:
+            self._reset()
+            self._model = model
+            self._phase = SetupPhase.DISCOVERING
+            self._discovery = HardwareDiscovery()
+            if model:
+                serial = self._discovery.discover(model)
+            else:
+                serial = self._discovery.discover_all()
+            video = self._discovery.discover_cameras()
+            self._candidates = [*serial, *video]
+            self._phase = SetupPhase.ASSIGNING
+            ports = [c for c in self._candidates if isinstance(c, SerialInterface)]
+            cameras = [c for c in self._candidates if isinstance(c, VideoInterface)]
+            return {"ports": ports, "cameras": cameras}
+        except Exception:
+            self._reset()
+            raise
+        finally:
+            self._parent.release_embodiment()
 
-    def start_identify(self) -> int:
-        """Begin motion detection on unassigned serial candidates.
+    def capture_previews(self, output_dir: str) -> list[dict]:
+        """Capture camera preview frames."""
+        self._parent.acquire_embodiment("camera-preview")
+        try:
+            discovery = self._discovery or HardwareDiscovery()
+            if not discovery.scanned_cameras:
+                discovery.discover_cameras()
+            return discovery.capture_camera_previews(output_dir)
+        finally:
+            self._parent.release_embodiment()
 
-        Transitions: ASSIGNING → IDENTIFYING.
-        Returns number of interfaces being monitored.
-        """
-        self._require_phase(SetupPhase.ASSIGNING)
+    # -- Identify (motion detection) -----------------------------------------
+
+    def start_motion_detection(self) -> int:
+        """Start motion detection. Acquires embodiment lock until stop."""
+        if self._phase == SetupPhase.IDLE:
+            raise RuntimeError("No scan performed. Run scan first.")
+        self._parent.acquire_embodiment("motion-detection")
+        try:
+            return self._start_identify()
+        except Exception:
+            self._parent.release_embodiment()
+            raise
+
+    def _start_identify(self) -> int:
         serial = [c for c in self.unassigned if isinstance(c, SerialInterface)]
         if not serial:
             raise RuntimeError("No serial interfaces to identify.")
@@ -93,9 +139,19 @@ class SetupSession:
         self._phase = SetupPhase.IDENTIFYING
         return len(serial)
 
-    def poll_identify(self) -> list[dict[str, Any]]:
+    def stop_motion_detection(self) -> None:
+        """Stop motion detection and release embodiment lock."""
+        if self._phase == SetupPhase.IDENTIFYING:
+            for c in self._candidates:
+                if isinstance(c, SerialInterface):
+                    c.motion_detector.reset()
+            self._phase = SetupPhase.ASSIGNING
+        self._parent.release_embodiment(owner="motion-detection")
+
+    def poll_motion(self) -> list[dict[str, Any]]:
         """Poll motion on unassigned serial candidates."""
-        self._require_phase(SetupPhase.IDENTIFYING)
+        if self._phase != SetupPhase.IDENTIFYING:
+            raise RuntimeError("Motion detection not started.")
         serial = [c for c in self.unassigned if isinstance(c, SerialInterface)]
         results: list[dict[str, Any]] = []
         saved = suppress_stderr()
@@ -114,21 +170,12 @@ class SetupSession:
             restore_stderr(saved)
         return results
 
-    def stop_identify(self) -> None:
-        """Stop identification, return to ASSIGNING."""
-        self._require_phase(SetupPhase.IDENTIFYING)
-        for c in self._candidates:
-            if isinstance(c, SerialInterface):
-                c.motion_detector.reset()
-        self._phase = SetupPhase.ASSIGNING
+    # -- Assign / Commit -----------------------------------------------------
 
     def assign(
         self, interface_stable_id: str, alias: str, spec_name: str,
     ) -> Assignment:
-        """Assign a discovered interface to an alias and spec.
-
-        Can be called in ASSIGNING or IDENTIFYING phase.
-        """
+        """Assign a discovered interface to an alias and spec."""
         if self._phase not in (SetupPhase.ASSIGNING, SetupPhase.IDENTIFYING):
             raise RuntimeError(f"Cannot assign in {self._phase} phase.")
         interface = None
@@ -156,7 +203,7 @@ class SetupSession:
                 return
         raise ValueError(f"No assignment with alias '{alias}'.")
 
-    def commit(self, manifest: Any) -> int:
+    def commit(self) -> int:
         """Write all assignments to manifest.
 
         Transitions: ASSIGNING/IDENTIFYING → COMMITTED.
@@ -167,12 +214,15 @@ class SetupSession:
         if not self._assignments:
             raise RuntimeError("No assignments to commit.")
         if self._phase == SetupPhase.IDENTIFYING:
-            self.stop_identify()
+            self.stop_motion_detection()
+        manifest = self._parent.manifest
         for a in self._assignments:
             self._commit_one(manifest, a)
         count = len(self._assignments)
         self._phase = SetupPhase.COMMITTED
         return count
+
+    # -- Serialization -------------------------------------------------------
 
     def to_dict(self) -> dict[str, Any]:
         """Serialize session state for API responses."""
@@ -194,6 +244,15 @@ class SetupSession:
             "unassigned": [c.stable_id for c in self.unassigned],
         }
 
+    # -- Internal ------------------------------------------------------------
+
+    def _reset(self) -> None:
+        self._phase = SetupPhase.IDLE
+        self._model = ""
+        self._discovery = None
+        self._candidates = []
+        self._assignments = []
+
     @staticmethod
     def _commit_one(manifest: Any, assignment: Assignment) -> None:
         from roboclaw.embodied.embodiment.arm.registry import all_arm_types
@@ -203,15 +262,10 @@ class SetupSession:
             manifest.set_arm(assignment.alias, assignment.spec_name, assignment.interface)
         elif assignment.spec_name in all_hand_types():
             manifest.set_hand(
-                assignment.alias, assignment.spec_name, assignment.interface,
+                assignment.alias, assignment.spec_name,
+                assignment.interface, assignment.slave_id,
             )
         elif isinstance(assignment.interface, VideoInterface):
             manifest.set_camera(assignment.alias, assignment.interface)
         else:
             raise ValueError(f"Unknown spec type: {assignment.spec_name}")
-
-    def _require_phase(self, expected: SetupPhase) -> None:
-        if self._phase != expected:
-            raise RuntimeError(
-                f"Expected {expected.value} phase, currently in {self._phase.value}."
-            )

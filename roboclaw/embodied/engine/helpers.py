@@ -7,6 +7,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from roboclaw.embodied.manifest import Manifest
+from roboclaw.embodied.manifest.binding import Binding
 from roboclaw.embodied.manifest.helpers import ensure_bimanual_cal_dir, get_roboclaw_home
 
 _NO_TTY_MSG = "This action requires a local terminal. Run: roboclaw agent"
@@ -19,27 +21,27 @@ class ActionError(Exception):
     """User-facing embodied action error."""
 
 
-def _resolve_action_arms(manifest: dict[str, Any], kwargs: dict[str, Any]) -> list[dict[str, Any]]:
+def _resolve_action_arms(manifest: Manifest, kwargs: dict[str, Any]) -> list[Binding]:
     try:
         return _resolve_arms(manifest, kwargs.get("arms", ""))
     except ValueError as exc:
         raise ActionError(str(exc)) from exc
 
 
-def _resolve_arms(manifest: dict[str, Any], arms_str: str) -> list[dict[str, Any]]:
-    configured = manifest.get("arms", [])
+def _resolve_arms(manifest: Manifest, arms_str: str) -> list[Binding]:
+    configured = manifest.arms
     if not configured:
         return []
     ports = _split_arm_tokens(arms_str)
     if not ports:
         return list(configured)
-    resolved: list[dict[str, Any]] = []
+    resolved: list[Binding] = []
     seen: set[str] = set()
     for port in ports:
         if port in seen:
             raise ValueError(f"Duplicate arm port '{port}' in arms.")
         seen.add(port)
-        arm = next((item for item in configured if item.get("port") == port), None)
+        arm = next((item for item in configured if item.port == port), None)
         if arm is None:
             raise ValueError(f"No arm with port '{port}' found in manifest.")
         resolved.append(arm)
@@ -52,25 +54,24 @@ def _split_arm_tokens(arms_str: str) -> list[str]:
     return [token.strip() for token in arms_str.split(",") if token.strip()]
 
 
-def group_arms(arms: list[dict[str, Any]]) -> dict[str, list[dict[str, Any]]]:
-    grouped: dict[str, list[dict[str, Any]]] = {"followers": [], "leaders": []}
+def group_arms(arms: list[Binding]) -> dict[str, list[Binding]]:
+    grouped: dict[str, list[Binding]] = {"followers": [], "leaders": []}
     for arm in arms:
-        arm_type = arm.get("type", "")
-        if "follower" in arm_type:
+        if arm.is_follower:
             grouped["followers"].append(arm)
             continue
-        if "leader" in arm_type:
+        if arm.is_leader:
             grouped["leaders"].append(arm)
     # Sort by alias so that "left_*" comes before "right_*".
     # Bimanual callers rely on [0]=left, [1]=right; without sorting,
     # the order depends on manifest array position which is fragile.
     for role in ("followers", "leaders"):
         if len(grouped[role]) == 2:
-            grouped[role].sort(key=lambda a: (0 if "left" in a.get("alias", "") else 1))
+            grouped[role].sort(key=lambda a: (0 if "left" in a.alias else 1))
     return grouped
 
 
-def _validate_pairing(followers: list[dict[str, Any]], leaders: list[dict[str, Any]]) -> str | None:
+def _validate_pairing(followers: list[Binding], leaders: list[Binding]) -> str | None:
     if not followers:
         return "No follower arms configured."
     if not leaders:
@@ -111,8 +112,8 @@ def _format_tty_failure(prefix: str, returncode: int, stderr_text: str) -> str:
     return f"{message}\nstderr: {stderr_text}"
 
 
-def dataset_root(manifest: dict[str, Any], fallback: Path | None = None) -> Path:
-    root = manifest.get("datasets", {}).get("root", "")
+def dataset_root(manifest: Manifest, fallback: Path | None = None) -> Path:
+    root = manifest.snapshot.get("datasets", {}).get("root", "")
     if root:
         return Path(root).expanduser()
     if fallback is not None:
@@ -121,7 +122,7 @@ def dataset_root(manifest: dict[str, Any], fallback: Path | None = None) -> Path
 
 
 def dataset_path(
-    manifest: dict[str, Any], dataset_name: str, fallback: Path | None = None,
+    manifest: Manifest, dataset_name: str, fallback: Path | None = None,
 ) -> Path:
     return dataset_root(manifest, fallback) / "local" / dataset_name
 
@@ -132,10 +133,10 @@ def _validate_dataset_name(dataset_name: str) -> str | None:
     return None
 
 
-def _arm_id(arm: dict[str, Any]) -> str:
-    arm_id = Path(arm.get("calibration_dir", "")).name
+def _arm_id(arm: Binding) -> str:
+    arm_id = arm.arm_id
     if not arm_id:
-        raise ValueError(f"Arm '{arm.get('alias', 'unknown')}' has no serial-based calibration_dir.")
+        raise ValueError(f"Arm '{arm.alias}' has no serial-based calibration_dir.")
     return arm_id
 
 
@@ -156,14 +157,14 @@ def _logs_dir() -> Path:
 @dataclass
 class _PreparedContext:
     controller: "ArmCommandBuilder"  # noqa: F821
-    followers: list[dict[str, Any]]
-    leaders: list[dict[str, Any]]
+    followers: list[Binding]
+    leaders: list[Binding]
     cameras: dict[str, Any]
     display_kwargs: dict[str, Any]
 
 
 def _prepare_common(
-    manifest: dict[str, Any],
+    manifest: Manifest,
     kwargs: dict[str, Any] | None = None,
     *,
     display_data: bool = False,
@@ -182,7 +183,7 @@ def _prepare_common(
         raise ActionError(error)
     all_arms = grouped["followers"] + grouped["leaders"]
     controller = builder_for_arms(all_arms)
-    cameras = {} if skip_cameras else resolve_cameras(manifest)
+    cameras = {} if skip_cameras else resolve_cameras(manifest.cameras)
     return _PreparedContext(
         controller=controller,
         followers=grouped["followers"],
@@ -193,7 +194,7 @@ def _prepare_common(
 
 
 def prepare_teleop(
-    manifest: dict[str, Any],
+    manifest: Manifest,
     kwargs: dict[str, Any] | None = None,
     *,
     display_data: bool = False,
@@ -211,13 +212,13 @@ def prepare_teleop(
 
     if len(ctx.followers) == 1:
         return ctx.controller.teleoperate(
-            robot_type=ctx.followers[0]["type"],
-            robot_port=ctx.followers[0]["port"],
-            robot_cal_dir=ctx.followers[0]["calibration_dir"],
+            robot_type=ctx.followers[0].type_name,
+            robot_port=ctx.followers[0].port,
+            robot_cal_dir=ctx.followers[0].calibration_dir,
             robot_id=_arm_id(ctx.followers[0]),
-            teleop_type=ctx.leaders[0]["type"],
-            teleop_port=ctx.leaders[0]["port"],
-            teleop_cal_dir=ctx.leaders[0]["calibration_dir"],
+            teleop_type=ctx.leaders[0].type_name,
+            teleop_port=ctx.leaders[0].port,
+            teleop_cal_dir=ctx.leaders[0].calibration_dir,
             teleop_id=_arm_id(ctx.leaders[0]),
             cameras=ctx.cameras,
             **ctx.display_kwargs,
@@ -240,7 +241,7 @@ def prepare_teleop(
 
 
 def prepare_record(
-    manifest: dict[str, Any],
+    manifest: Manifest,
     kwargs: dict[str, Any],
     *,
     display_data: bool = False,
@@ -296,13 +297,13 @@ def prepare_record(
 
     if len(ctx.followers) == 1:
         argv = ctx.controller.record(
-            robot_type=ctx.followers[0]["type"],
-            robot_port=ctx.followers[0]["port"],
-            robot_cal_dir=ctx.followers[0]["calibration_dir"],
+            robot_type=ctx.followers[0].type_name,
+            robot_port=ctx.followers[0].port,
+            robot_cal_dir=ctx.followers[0].calibration_dir,
             robot_id=_arm_id(ctx.followers[0]),
-            teleop_type=ctx.leaders[0]["type"],
-            teleop_port=ctx.leaders[0]["port"],
-            teleop_cal_dir=ctx.leaders[0]["calibration_dir"],
+            teleop_type=ctx.leaders[0].type_name,
+            teleop_port=ctx.leaders[0].port,
+            teleop_cal_dir=ctx.leaders[0].calibration_dir,
             teleop_id=_arm_id(ctx.leaders[0]),
             **record_kwargs,
             **ctx.display_kwargs,
