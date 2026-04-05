@@ -66,7 +66,7 @@ class HardwareDiscovery:
 
         spec = get_arm_spec_by_name(model)
         prober = get_prober(spec.probe_protocol)
-        ports = scan_serial_ports(spec.device_patterns or None)
+        ports = scan_serial_ports(spec.device_patterns)
         result = self._probe_ports(
             ports, prober, spec.probe_protocol,
             motor_ids=list(spec.probe_motor_ids),

@@ -33,17 +33,18 @@ def models_for(category: EmbodimentCategory) -> list[EmbodimentSpec]:
 
 def get_spec(name: str) -> EmbodimentSpec:
     """Look up any embodiment spec by name, across all registries."""
-    from roboclaw.embodied.embodiment.arm.registry import all_arm_specs
-    from roboclaw.embodied.embodiment.hand.registry import all_hand_specs
+    from roboclaw.embodied.embodiment.arm.registry import get_arm_spec_by_name
+    from roboclaw.embodied.embodiment.hand.registry import get_hand_spec
 
     name = name.lower()
-    arm_specs = all_arm_specs()
-    if name in arm_specs:
-        return arm_specs[name]
-    hand_specs = all_hand_specs()
-    if name in hand_specs:
-        return hand_specs[name]
-    raise ValueError(f"Unknown embodiment model: '{name}'")
+    try:
+        return get_arm_spec_by_name(name)
+    except ValueError:
+        pass
+    try:
+        return get_hand_spec(name)
+    except ValueError:
+        raise ValueError(f"Unknown embodiment model: '{name}'")
 
 
 def is_supported(category: EmbodimentCategory) -> bool:

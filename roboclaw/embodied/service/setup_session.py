@@ -6,6 +6,7 @@ Shared by CLI agent and Web UI.
 """
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass
 from enum import Enum
 from typing import TYPE_CHECKING, Any
@@ -317,10 +318,9 @@ class SetupSession:
             self._handle_camera_answer(prompt_id, answer)
 
     def result(self) -> str:
-        import json as _json
         if self._result:
             return self._result
-        return _json.dumps({
+        return json.dumps({
             "status": "no_assignments",
             "message": t("noAssignments", self._language),
             "bindings": 0,
@@ -406,10 +406,18 @@ class SetupSession:
         """Run full scan and print summary."""
         lang = self._language
         print(t("scanningModel", lang, model=model))
-        result = self.run_full_scan(model)
+        try:
+            result = self.run_full_scan(model)
+        except (ValueError, RuntimeError) as exc:
+            print(f"  Error: {exc}")
+            self._set_result("not_supported")
+            return
         ports = result["ports"]
         cameras = result["cameras"]
         print(t("foundPorts", lang, ports=len(ports), cameras=len(cameras)))
+        if not ports and not cameras:
+            self._set_result("no_hardware")
+            return
         for i, port in enumerate(ports):
             port_id = port.by_id or port.dev or "?"
             print(f"  [{i}] {port_id}  ({len(port.motor_ids)} {t('motorsFound', lang)})")
@@ -496,7 +504,7 @@ class SetupSession:
             cam = all_video[idx]
             try:
                 self.assign(cam.stable_id, answer, "opencv")
-                print(f"  Assigned: {answer}")
+                print(t("assigned", self._language, alias=answer, spec="opencv"))
             except ValueError as exc:
                 print(f"  Error: {exc}")
         self._camera_index = idx + 1
@@ -510,13 +518,20 @@ class SetupSession:
 
     def _submit_embodiment_type(self, answer: str) -> None:
         from roboclaw.embodied.embodiment.catalog import EmbodimentCategory
-        mapping = {"1": "arm", "2": "hand", "3": "humanoid", "4": "mobile"}
-        category = mapping.get(answer, answer.lower())
+        cats = list(EmbodimentCategory)
         try:
-            EmbodimentCategory(category)
+            idx = int(answer) - 1
+            if 0 <= idx < len(cats):
+                self._embodiment_category = cats[idx].value
+            else:
+                return
         except ValueError:
-            return
-        self._embodiment_category = category
+            low = answer.lower()
+            try:
+                EmbodimentCategory(low)
+                self._embodiment_category = low
+            except ValueError:
+                return
 
     def on_timeout(self) -> None:
         """Called when motion detection times out and user declines retry."""
@@ -526,7 +541,6 @@ class SetupSession:
 
     def _set_result(self, status: str, **kwargs: Any) -> None:
         """Set structured result message."""
-        import json
         lang = self._language
         message_keys = {
             "committed": "resultCommitted",

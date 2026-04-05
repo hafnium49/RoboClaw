@@ -15,6 +15,7 @@ _RECORD_ACTIONS = ["record"]
 _REPLAY_ACTIONS = ["replay"]
 _TRAIN_ACTIONS = ["train", "job_status", "list_datasets", "list_policies"]
 _INFER_ACTIONS = ["run_policy"]
+_LANGUAGE_PROP = {"type": "string", "description": "User's language code (en, zh)."}
 
 _TOOL_GROUPS: dict[str, dict[str, Any]] = {
     "setup": {
@@ -28,10 +29,7 @@ _TOOL_GROUPS: dict[str, dict[str, Any]] = {
                     "enum": _SETUP_ACTIONS,
                     "description": "The setup action to perform.",
                 },
-                "language": {
-                    "type": "string",
-                    "description": "User's language code (en, zh).",
-                },
+                "language": _LANGUAGE_PROP,
                 "model": {
                     "type": "string",
                     "description": "Embodiment model name (e.g. so101, koch, inspire_rh56). Optional — the interactive flow handles selection.",
@@ -70,10 +68,7 @@ _TOOL_GROUPS: dict[str, dict[str, Any]] = {
                     "enum": _DOCTOR_ACTIONS,
                     "description": "The doctor action to perform.",
                 },
-                "language": {
-                    "type": "string",
-                    "description": "User's language code (en, zh).",
-                },
+                "language": _LANGUAGE_PROP,
             },
             "required": ["action"],
             "additionalProperties": False,
@@ -90,10 +85,7 @@ _TOOL_GROUPS: dict[str, dict[str, Any]] = {
                     "enum": _CALIBRATION_ACTIONS,
                     "description": "The calibration action to perform.",
                 },
-                "language": {
-                    "type": "string",
-                    "description": "User's language code (en, zh).",
-                },
+                "language": _LANGUAGE_PROP,
                 "arms": {
                     "type": "string",
                     "description": "Comma-separated arm port paths (by-id from status).",
@@ -114,10 +106,7 @@ _TOOL_GROUPS: dict[str, dict[str, Any]] = {
                     "enum": _TELEOP_ACTIONS,
                     "description": "The teleop action to perform.",
                 },
-                "language": {
-                    "type": "string",
-                    "description": "User's language code (en, zh).",
-                },
+                "language": _LANGUAGE_PROP,
                 "arms": {
                     "type": "string",
                     "description": "Comma-separated arm port paths (by-id from status).",
@@ -142,10 +131,7 @@ _TOOL_GROUPS: dict[str, dict[str, Any]] = {
                     "enum": _RECORD_ACTIONS,
                     "description": "The recording action to perform.",
                 },
-                "language": {
-                    "type": "string",
-                    "description": "User's language code (en, zh).",
-                },
+                "language": _LANGUAGE_PROP,
                 "arms": {
                     "type": "string",
                     "description": "Comma-separated arm port paths (by-id from status).",
@@ -195,10 +181,7 @@ _TOOL_GROUPS: dict[str, dict[str, Any]] = {
                     "enum": _REPLAY_ACTIONS,
                     "description": "The replay action to perform.",
                 },
-                "language": {
-                    "type": "string",
-                    "description": "User's language code (en, zh).",
-                },
+                "language": _LANGUAGE_PROP,
                 "arms": {
                     "type": "string",
                     "description": "Comma-separated arm port paths (by-id from status).",
@@ -231,10 +214,7 @@ _TOOL_GROUPS: dict[str, dict[str, Any]] = {
                     "enum": _TRAIN_ACTIONS,
                     "description": "The training action to perform.",
                 },
-                "language": {
-                    "type": "string",
-                    "description": "User's language code (en, zh).",
-                },
+                "language": _LANGUAGE_PROP,
                 "dataset_name": {
                     "type": "string",
                     "description": "Dataset slug for training.",
@@ -267,10 +247,7 @@ _TOOL_GROUPS: dict[str, dict[str, Any]] = {
                     "enum": _INFER_ACTIONS,
                     "description": "The inference action to perform.",
                 },
-                "language": {
-                    "type": "string",
-                    "description": "User's language code (en, zh).",
-                },
+                "language": _LANGUAGE_PROP,
                 "arms": {
                     "type": "string",
                     "description": "Comma-separated arm port paths (by-id from status).",
