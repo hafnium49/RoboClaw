@@ -61,6 +61,7 @@ class SetupSession:
         self._embodiment_category: str = ""
         self._language: str = "en"
         self._messages: list[str] = []
+        self._camera_preview: Any = None
 
     def drain_messages(self) -> list[str]:
         """Return and clear accumulated messages."""
@@ -507,16 +508,49 @@ class SetupSession:
         """All video candidates (stable order, not affected by assignments)."""
         return [c for c in self._candidates if isinstance(c, VideoInterface)]
 
+    def _stop_camera_preview(self) -> None:
+        if self._camera_preview is not None:
+            self._camera_preview.stop()
+            self._camera_preview = None
+
+    def _start_camera_preview(self) -> None:
+        all_video = self._video_candidates
+        if not all_video:
+            return
+        cameras: dict[int, str] = {}
+        for cam in all_video:
+            dev = cam.dev or ""
+            if dev.startswith("/dev/video"):
+                try:
+                    cameras[int(dev.replace("/dev/video", ""))] = dev
+                except ValueError:
+                    pass
+        if not cameras:
+            return
+        try:
+            from roboclaw.embodied.hardware.camera_preview import CameraPreviewServer
+            import webbrowser
+            srv = CameraPreviewServer(cameras)
+            url = srv.start()
+            self._camera_preview = srv
+            self._messages.append(f"  📷 Camera preview: {url}")
+            webbrowser.open(url)
+        except Exception:
+            pass  # preview is best-effort
+
     def _next_camera_step(self):
         from roboclaw.embodied.adapters.protocol import PromptStep
 
         lang = self._language
         all_video = self._video_candidates
         if not all_video:
+            self._stop_camera_preview()
             return None
         if self._camera_index == 0:
             self._messages.append(t("cameraNaming", lang))
+            self._start_camera_preview()
         if self._camera_index >= len(all_video):
+            self._stop_camera_preview()
             return None
         cam = all_video[self._camera_index]
         # Skip already-assigned cameras
@@ -613,6 +647,7 @@ class SetupSession:
 
     def reset(self) -> None:
         """Reset session to idle state."""
+        self._stop_camera_preview()
         self._cleanup_motion()
         self._phase = SetupPhase.IDLE
         self._model = ""
