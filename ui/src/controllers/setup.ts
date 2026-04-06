@@ -306,7 +306,6 @@ export const useSetup = create<SetupStore>((set, get) => ({
     try {
       await deleteApi(`${SETUP}/session/assign/${encodeURIComponent(alias)}`)
       await get().refreshSession()
-      get().doCapturePreview()
     } catch (e: unknown) {
       set({ error: (e as Error).message })
     }
