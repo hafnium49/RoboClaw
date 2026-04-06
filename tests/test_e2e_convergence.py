@@ -121,7 +121,7 @@ class TestConvergence:
     def test_hardware_status_via_http_matches_service(self, client, app_and_service):
         """HTTP GET /hardware-status returns same data as direct service call."""
         _, service = app_and_service
-        resp = client.get("/api/dashboard/hardware-status")
+        resp = client.get("/api/hardware/status")
         assert resp.status_code == 200
         http_data = resp.json()
 
@@ -207,7 +207,7 @@ class TestFullHTTPPath:
     """HTTP requests flow through routes -> service -> engine correctly."""
 
     def test_hardware_status_endpoint(self, client):
-        resp = client.get("/api/dashboard/hardware-status")
+        resp = client.get("/api/hardware/status")
         assert resp.status_code == 200
         data = resp.json()
         assert "ready" in data
@@ -218,7 +218,7 @@ class TestFullHTTPPath:
 
     def test_hardware_status_arms_detail(self, client):
         """Each arm in the response has the expected connectivity fields."""
-        resp = client.get("/api/dashboard/hardware-status")
+        resp = client.get("/api/hardware/status")
         data = resp.json()
         for arm in data["arms"]:
             assert "alias" in arm
@@ -229,7 +229,7 @@ class TestFullHTTPPath:
 
     def test_hardware_status_cameras_detail(self, client):
         """Each camera has connectivity info."""
-        resp = client.get("/api/dashboard/hardware-status")
+        resp = client.get("/api/hardware/status")
         data = resp.json()
         for cam in data["cameras"]:
             assert "alias" in cam
@@ -237,14 +237,14 @@ class TestFullHTTPPath:
             assert cam["connected"] is True
 
     def test_session_status_idle(self, client):
-        resp = client.get("/api/dashboard/session/status")
+        resp = client.get("/api/session/status")
         assert resp.status_code == 200
         data = resp.json()
         assert data["state"] == "idle"
         assert data["dataset"] is None
 
     def test_network_info_returns_configured_port(self, client):
-        resp = client.get("/api/dashboard/network-info")
+        resp = client.get("/api/system/network")
         assert resp.status_code == 200
         assert resp.json()["port"] == 8765
 
@@ -252,6 +252,6 @@ class TestFullHTTPPath:
         """POST /setup/scan returns 409 Conflict when embodiment is locked."""
         _, service = app_and_service
         service.acquire_embodiment("teleop")
-        resp = client.post("/api/dashboard/setup/scan")
+        resp = client.post("/api/setup/scan")
         assert resp.status_code == 409
         service.release_embodiment(owner="teleop")

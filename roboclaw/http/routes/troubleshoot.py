@@ -19,17 +19,17 @@ class RecheckRequest(BaseModel):
 
 def register_troubleshoot_routes(app: FastAPI, service: EmbodiedService) -> None:
 
-    @app.get("/api/dashboard/troubleshoot-map")
+    @app.get("/api/troubleshoot/map")
     async def troubleshoot_map() -> dict[str, Any]:
         return get_troubleshoot_map_json()
 
-    @app.post("/api/dashboard/troubleshoot/recheck")
+    @app.post("/api/troubleshoot/recheck")
     async def troubleshoot_recheck(body: RecheckRequest) -> dict[str, Any]:
         monitor: HardwareMonitor = app.state.hardware_monitor
         faults = monitor.check_hardware()
         return {"faults": [f.to_dict() for f in faults]}
 
-    @app.post("/api/dashboard/troubleshoot/snapshot")
+    @app.post("/api/troubleshoot/snapshot")
     async def troubleshoot_snapshot() -> dict[str, Any]:
         manifest = service.manifest.snapshot
         monitor: HardwareMonitor = app.state.hardware_monitor

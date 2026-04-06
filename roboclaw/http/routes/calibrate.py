@@ -13,9 +13,9 @@ class StartCalibrationRequest(BaseModel):
 
 
 def register_calibrate_routes(app: FastAPI, service: Any) -> None:
-    """Register /api/dashboard/calibrate/* routes on the given app."""
+    """Register /api/calibration/* routes on the given app."""
 
-    API = "/api/dashboard/calibrate"
+    API = "/api/calibration"
 
     def _handle_calibration_error(exc: RuntimeError) -> None:
         raise HTTPException(409, str(exc)) from exc
@@ -31,7 +31,7 @@ def register_calibrate_routes(app: FastAPI, service: Any) -> None:
     async def calibrate_status() -> dict:
         return service.get_calibration_status()
 
-    @app.post(f"{API}/set-homing")
+    @app.post(f"{API}/homing")
     async def calibrate_set_homing() -> dict:
         try:
             return await service.set_calibration_homing()

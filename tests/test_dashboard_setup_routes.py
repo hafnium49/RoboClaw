@@ -108,7 +108,7 @@ def test_scan_returns_ports_and_cameras() -> None:
     app = _make_app()
     client = TestClient(app)
     with _patched_scan(cameras=_MOCK_CAMERAS):
-        resp = client.post("/api/dashboard/setup/scan")
+        resp = client.post("/api/setup/scan")
 
     assert resp.status_code == 200
     data = resp.json()
@@ -121,10 +121,10 @@ def test_motion_start_after_scan() -> None:
     app = _make_app()
     client = TestClient(app)
     with _patched_scan():
-        client.post("/api/dashboard/setup/scan")
+        client.post("/api/setup/scan")
 
     with patch("roboclaw.embodied.hardware.motion_detector.MotionDetector._read_positions", return_value={1: 100, 2: 200}):
-        resp = client.post("/api/dashboard/setup/motion/start")
+        resp = client.post("/api/setup/motion/start")
 
     assert resp.status_code == 200
     assert resp.json()["status"] == "watching"
@@ -134,7 +134,7 @@ def test_motion_start_after_scan() -> None:
 def test_motion_start_without_scan_returns_400() -> None:
     app = _make_app()
     client = TestClient(app, raise_server_exceptions=False)
-    resp = client.post("/api/dashboard/setup/motion/start")
+    resp = client.post("/api/setup/motion/start")
     assert resp.status_code == 400
 
 
@@ -142,11 +142,11 @@ def test_motion_poll_returns_deltas() -> None:
     app = _make_app()
     client = TestClient(app)
     with _patched_scan():
-        client.post("/api/dashboard/setup/scan")
+        client.post("/api/setup/scan")
     with patch("roboclaw.embodied.hardware.motion_detector.MotionDetector._read_positions", return_value={1: 100, 2: 200}):
-        client.post("/api/dashboard/setup/motion/start")
+        client.post("/api/setup/motion/start")
     with patch("roboclaw.embodied.hardware.motion_detector.MotionDetector._read_positions", return_value={1: 200, 2: 300}):
-        resp = client.get("/api/dashboard/setup/motion/poll")
+        resp = client.get("/api/setup/motion/poll")
 
     assert resp.status_code == 200
     ports = resp.json()["ports"]
@@ -158,14 +158,14 @@ def test_motion_poll_returns_deltas() -> None:
 def test_motion_poll_without_start_returns_400() -> None:
     app = _make_app()
     client = TestClient(app, raise_server_exceptions=False)
-    resp = client.get("/api/dashboard/setup/motion/poll")
+    resp = client.get("/api/setup/motion/poll")
     assert resp.status_code == 400
 
 
 def test_motion_stop_clears_state() -> None:
     app = _make_app()
     client = TestClient(app)
-    resp = client.post("/api/dashboard/setup/motion/stop")
+    resp = client.post("/api/setup/motion/stop")
     assert resp.status_code == 200
     assert resp.json()["status"] == "stopped"
     assert app.state.setup_wizard.motion_active is False
@@ -178,7 +178,7 @@ def test_add_arm() -> None:
     svc = app.state.embodied_service
     with patch("roboclaw.http.routes.setup._resolve_serial_interface", return_value="iface"):
         resp = client.post(
-            "/api/dashboard/setup/arm",
+            "/api/manifest/arms",
             json={"alias": "left", "arm_type": "so101_follower", "port_id": "/dev/serial/by-id/usb-ABC"},
         )
     assert resp.status_code == 200
@@ -190,7 +190,7 @@ def test_remove_arm() -> None:
     app = _make_app()
     client = TestClient(app)
     svc = app.state.embodied_service
-    resp = client.delete("/api/dashboard/setup/arm/left")
+    resp = client.delete("/api/manifest/arms/left")
     assert resp.status_code == 200
     assert resp.json()["status"] == "removed"
     svc.unbind_arm.assert_called_once_with("left")
@@ -201,7 +201,7 @@ def test_rename_arm() -> None:
     client = TestClient(app)
     svc = app.state.embodied_service
     resp = client.patch(
-        "/api/dashboard/setup/arm/left/rename",
+        "/api/manifest/arms/left",
         json={"new_alias": "right"},
     )
     assert resp.status_code == 200
@@ -215,7 +215,7 @@ def test_add_camera() -> None:
     svc = app.state.embodied_service
     with patch("roboclaw.embodied.hardware.scan.scan_cameras", return_value=_MOCK_CAMERAS):
         resp = client.post(
-            "/api/dashboard/setup/camera",
+            "/api/manifest/cameras",
             json={"alias": "top", "camera_index": 0},
         )
     assert resp.status_code == 200
@@ -227,7 +227,7 @@ def test_remove_camera() -> None:
     app = _make_app()
     client = TestClient(app)
     svc = app.state.embodied_service
-    resp = client.delete("/api/dashboard/setup/camera/top")
+    resp = client.delete("/api/manifest/cameras/top")
     assert resp.status_code == 200
     svc.unbind_camera.assert_called_once_with("top")
 
@@ -236,7 +236,7 @@ def test_current_setup() -> None:
     app = _make_app()
     client = TestClient(app)
     svc = app.state.embodied_service
-    resp = client.get("/api/dashboard/setup/current")
+    resp = client.get("/api/manifest")
     assert resp.status_code == 200
     data = resp.json()
     assert len(data["arms"]) == 1
@@ -247,5 +247,5 @@ def test_current_setup() -> None:
 def test_scan_returns_409_when_recording() -> None:
     app = _make_app(session_busy=True)
     client = TestClient(app, raise_server_exceptions=False)
-    resp = client.post("/api/dashboard/setup/scan")
+    resp = client.post("/api/setup/scan")
     assert resp.status_code == 409

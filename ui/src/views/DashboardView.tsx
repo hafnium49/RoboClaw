@@ -143,7 +143,7 @@ function ServoChartPanel({ state, t }: { state: SessionState; t: (key: any) => s
   const poll = useCallback(async () => {
     if (busy) return
     try {
-      const r = await fetch('/api/dashboard/servo-positions')
+      const r = await fetch('/api/hardware/servos')
       const data = await r.json()
       if (data.error || !data.arms) return
       setHistories((prev) => {
@@ -203,11 +203,11 @@ function CameraPreviewPanel({ cameras, busy }: { cameras: any[]; busy: boolean }
     if (busy || capturing) return
     setCapturing(true)
     try {
-      await postJson('/api/dashboard/setup/camera-previews')
+      await postJson('/api/setup/previews')
       const ts = Date.now()
       const map: Record<number, string> = {}
       cameras.forEach((_: any, i: number) => {
-        map[i] = `/api/dashboard/setup/camera-preview/${i}?t=${ts}`
+        map[i] = `/api/setup/previews/${i}?t=${ts}`
       })
       setPreviews(map)
     } catch { /* ignore */ }

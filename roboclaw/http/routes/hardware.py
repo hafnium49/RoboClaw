@@ -12,10 +12,10 @@ from roboclaw.embodied.service import EmbodiedService
 
 def register_hardware_routes(app: FastAPI, service: EmbodiedService) -> None:
 
-    @app.get("/api/dashboard/hardware-status")
+    @app.get("/api/hardware/status")
     async def hardware_status() -> dict[str, Any]:
         return service.get_hardware_status()
 
-    @app.get("/api/dashboard/servo-positions")
+    @app.get("/api/hardware/servos")
     async def servo_positions() -> dict[str, Any]:
         return await asyncio.to_thread(service.read_servo_positions)

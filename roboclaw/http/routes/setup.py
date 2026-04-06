@@ -49,10 +49,10 @@ def _map_service_errors(app: FastAPI) -> None:
 
 
 def register_setup_routes(app: FastAPI, service: Any) -> None:
-    """Register /api/dashboard/setup/* routes on the given app."""
+    """Register /api/setup/* routes on the given app."""
     _map_service_errors(app)
 
-    @app.post("/api/dashboard/setup/scan")
+    @app.post("/api/setup/scan")
     async def setup_scan(body: ScanRequest | None = None) -> dict[str, Any]:
         model = body.model if body else ""
         try:
@@ -64,7 +64,7 @@ def register_setup_routes(app: FastAPI, service: Any) -> None:
         except PermissionError as exc:
             raise HTTPException(403, str(exc)) from exc
 
-    @app.post("/api/dashboard/setup/camera-previews")
+    @app.post("/api/setup/previews")
     async def setup_camera_previews() -> list[dict]:
         from roboclaw.embodied.service import EmbodimentBusyError
 
@@ -78,7 +78,7 @@ def register_setup_routes(app: FastAPI, service: Any) -> None:
         except RuntimeError as exc:
             raise HTTPException(400, str(exc)) from exc
 
-    @app.get("/api/dashboard/setup/camera-preview/{index}")
+    @app.get("/api/setup/previews/{index}")
     async def setup_camera_preview_image(index: int):
         from fastapi.responses import FileResponse
 
@@ -87,7 +87,7 @@ def register_setup_routes(app: FastAPI, service: Any) -> None:
             return FileResponse(str(f), media_type="image/jpeg")
         raise HTTPException(404, f"Preview not found for camera index {index}")
 
-    @app.post("/api/dashboard/setup/motion/start")
+    @app.post("/api/setup/motion/start")
     async def motion_start() -> dict[str, Any]:
         from roboclaw.embodied.service import EmbodimentBusyError
 
@@ -101,7 +101,7 @@ def register_setup_routes(app: FastAPI, service: Any) -> None:
             raise HTTPException(400, str(exc)) from exc
         return {"status": "watching", "port_count": port_count}
 
-    @app.get("/api/dashboard/setup/motion/poll")
+    @app.get("/api/setup/motion/poll")
     async def motion_poll() -> dict[str, Any]:
         try:
             results = await asyncio.to_thread(service.setup.poll_motion)
@@ -109,18 +109,18 @@ def register_setup_routes(app: FastAPI, service: Any) -> None:
             raise HTTPException(400, str(exc)) from exc
         return {"ports": results}
 
-    @app.post("/api/dashboard/setup/motion/stop")
+    @app.post("/api/setup/motion/stop")
     async def motion_stop() -> dict[str, str]:
         await asyncio.to_thread(service.setup.stop_motion_detection)
         return {"status": "stopped"}
 
     # -- SetupSession assign/commit ------------------------------------------
 
-    @app.get("/api/dashboard/setup/session")
+    @app.get("/api/setup/session")
     async def setup_session_status() -> dict[str, Any]:
         return service.setup.to_dict()
 
-    @app.post("/api/dashboard/setup/session/assign")
+    @app.post("/api/setup/session/assign")
     async def setup_assign(body: AssignRequest) -> dict[str, Any]:
         try:
             assignment = service.setup.assign(
@@ -134,7 +134,7 @@ def register_setup_routes(app: FastAPI, service: Any) -> None:
             "spec_name": assignment.spec_name,
         }
 
-    @app.delete("/api/dashboard/setup/session/assign/{alias}")
+    @app.delete("/api/setup/session/assign/{alias}")
     async def setup_unassign(alias: str) -> dict[str, str]:
         try:
             service.setup.unassign(alias)
@@ -142,7 +142,7 @@ def register_setup_routes(app: FastAPI, service: Any) -> None:
             raise HTTPException(400, str(exc)) from exc
         return {"status": "unassigned", "alias": alias}
 
-    @app.post("/api/dashboard/setup/session/commit")
+    @app.post("/api/setup/session/commit")
     async def setup_commit() -> dict[str, Any]:
         try:
             count = await asyncio.to_thread(service.setup.commit)
@@ -152,7 +152,7 @@ def register_setup_routes(app: FastAPI, service: Any) -> None:
 
     # -- Direct arm/camera CRUD (legacy, still useful) -----------------------
 
-    @app.post("/api/dashboard/setup/arm")
+    @app.post("/api/manifest/arms")
     async def setup_add_arm(body: AddArmRequest) -> dict[str, Any]:
         try:
             interface = await asyncio.to_thread(_resolve_serial_interface, body.port_id)
@@ -161,7 +161,7 @@ def register_setup_routes(app: FastAPI, service: Any) -> None:
             raise HTTPException(400, str(exc)) from exc
         return {"status": "added", "alias": body.alias}
 
-    @app.delete("/api/dashboard/setup/arm/{alias}")
+    @app.delete("/api/manifest/arms/{alias}")
     async def setup_remove_arm(alias: str) -> dict[str, str]:
         try:
             await asyncio.to_thread(service.unbind_arm, alias)
@@ -169,7 +169,7 @@ def register_setup_routes(app: FastAPI, service: Any) -> None:
             raise HTTPException(400, str(exc)) from exc
         return {"status": "removed", "alias": alias}
 
-    @app.patch("/api/dashboard/setup/arm/{alias}/rename")
+    @app.patch("/api/manifest/arms/{alias}")
     async def setup_rename_arm(alias: str, body: RenameRequest) -> dict[str, str]:
         try:
             await asyncio.to_thread(service.rename_arm, alias, body.new_alias)
@@ -177,7 +177,7 @@ def register_setup_routes(app: FastAPI, service: Any) -> None:
             raise HTTPException(400, str(exc)) from exc
         return {"status": "renamed", "old": alias, "new": body.new_alias}
 
-    @app.post("/api/dashboard/setup/camera")
+    @app.post("/api/manifest/cameras")
     async def setup_add_camera(body: AddCameraRequest) -> dict[str, Any]:
         from roboclaw.embodied.hardware.scan import scan_cameras
 
@@ -199,7 +199,7 @@ def register_setup_routes(app: FastAPI, service: Any) -> None:
             raise HTTPException(400, str(exc)) from exc
         return {"status": "added", "alias": body.alias}
 
-    @app.delete("/api/dashboard/setup/camera/{alias}")
+    @app.delete("/api/manifest/cameras/{alias}")
     async def setup_remove_camera(alias: str) -> dict[str, str]:
         try:
             await asyncio.to_thread(service.unbind_camera, alias)
@@ -207,6 +207,6 @@ def register_setup_routes(app: FastAPI, service: Any) -> None:
             raise HTTPException(400, str(exc)) from exc
         return {"status": "removed", "alias": alias}
 
-    @app.get("/api/dashboard/setup/current")
+    @app.get("/api/manifest")
     async def setup_current() -> dict[str, Any]:
         return service.manifest.snapshot

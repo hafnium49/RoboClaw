@@ -1,7 +1,8 @@
 import { create } from 'zustand'
 import { postJson } from './api'
 
-const API = '/api/dashboard/setup'
+const SETUP = '/api/setup'
+const MANIFEST = '/api/manifest'
 
 // ---------------------------------------------------------------------------
 // Types
@@ -89,7 +90,7 @@ export const useSetup = create<SetupStore>((set, get) => ({
   doScan: async () => {
     set({ scanning: true, error: null, scannedPorts: [], scannedCameras: [] })
     try {
-      const data = await postJson(`${API}/scan`)
+      const data = await postJson(`${SETUP}/scan`)
       const ports: ScannedPort[] = (data.ports || []).map((p: any) => ({
         port_id: p.by_id || p.dev || '',
         by_id: p.by_id || '',
@@ -120,11 +121,11 @@ export const useSetup = create<SetupStore>((set, get) => ({
 
   doCapturePreview: async () => {
     try {
-      await postJson(`${API}/camera-previews`)
+      await postJson(`${SETUP}/previews`)
       set((s) => ({
         scannedCameras: s.scannedCameras.map((c) => ({
           ...c,
-          preview_url: `${API}/camera-preview/${c.index}?t=${Date.now()}`,
+          preview_url: `${SETUP}/previews/${c.index}?t=${Date.now()}`,
         })),
       }))
     } catch { /* ignore preview failure */ }
@@ -132,7 +133,7 @@ export const useSetup = create<SetupStore>((set, get) => ({
 
   startMotion: async () => {
     try {
-      await postJson(`${API}/motion/start`)
+      await postJson(`${SETUP}/motion/start`)
       set({ motionActive: true })
       motionTimer = setInterval(() => get().pollMotion(), 300)
     } catch (e: unknown) {
@@ -142,7 +143,7 @@ export const useSetup = create<SetupStore>((set, get) => ({
 
   pollMotion: async () => {
     try {
-      const res = await fetch(`${API}/motion/poll`)
+      const res = await fetch(`${SETUP}/motion/poll`)
       if (!res.ok) return
       const data = await res.json()
       const portResults = data.ports || []
@@ -163,22 +164,22 @@ export const useSetup = create<SetupStore>((set, get) => ({
     }
     set({ motionActive: false })
     try {
-      await postJson(`${API}/motion/stop`)
+      await postJson(`${SETUP}/motion/stop`)
     } catch { /* ignore */ }
   },
 
   addArm: async (alias, armType, portId) => {
-    await postJson(`${API}/arm`, { alias, arm_type: armType, port_id: portId })
+    await postJson(`${MANIFEST}/arms`, { alias, arm_type: armType, port_id: portId })
     await get().loadCurrentSetup()
   },
 
   removeArm: async (alias) => {
-    await fetch(`${API}/arm/${encodeURIComponent(alias)}`, { method: 'DELETE' })
+    await fetch(`${MANIFEST}/arms/${encodeURIComponent(alias)}`, { method: 'DELETE' })
     await get().loadCurrentSetup()
   },
 
   renameArm: async (alias, newAlias) => {
-    await fetch(`${API}/arm/${encodeURIComponent(alias)}/rename`, {
+    await fetch(`${MANIFEST}/arms/${encodeURIComponent(alias)}`, {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ new_alias: newAlias }),
@@ -187,18 +188,18 @@ export const useSetup = create<SetupStore>((set, get) => ({
   },
 
   addCamera: async (alias, cameraIndex) => {
-    await postJson(`${API}/camera`, { alias, camera_index: cameraIndex })
+    await postJson(`${MANIFEST}/cameras`, { alias, camera_index: cameraIndex })
     await get().loadCurrentSetup()
   },
 
   removeCamera: async (alias) => {
-    await fetch(`${API}/camera/${encodeURIComponent(alias)}`, { method: 'DELETE' })
+    await fetch(`${MANIFEST}/cameras/${encodeURIComponent(alias)}`, { method: 'DELETE' })
     await get().loadCurrentSetup()
   },
 
   loadCurrentSetup: async () => {
     try {
-      const res = await fetch(`${API}/current`)
+      const res = await fetch(`${MANIFEST}`)
       if (!res.ok) return
       const data = await res.json()
       set({

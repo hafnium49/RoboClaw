@@ -24,7 +24,7 @@ def register_network_routes(
     get_config: Callable[[], tuple[str, int]],
 ) -> None:
 
-    @app.get("/api/dashboard/network-info")
+    @app.get("/api/system/network")
     async def network_info() -> dict[str, Any]:
         host, port = get_config()
         return {"host": host, "port": port, "lan_ip": _get_lan_ip()}

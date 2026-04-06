@@ -146,7 +146,14 @@ interface DashboardStore {
   clearLog: () => void
 }
 
-const API = '/api/dashboard'
+const SESSION = '/api/session'
+const TELEOP = '/api/teleop'
+const RECORD = '/api/record'
+const HARDWARE = '/api/hardware'
+const DATASETS = '/api/datasets'
+const TROUBLESHOOT = '/api/troubleshoot'
+const SYSTEM = '/api/system'
+const CALIBRATION = '/api/calibration'
 
 // ---------------------------------------------------------------------------
 // Default session state
@@ -193,7 +200,7 @@ export const useDashboard = create<DashboardStore>((set, get) => ({
 
   fetchSessionStatus: async () => {
     try {
-      const data = await api(`${API}/session/status`)
+      const data = await api(`${SESSION}/status`)
       set({ session: data })
     } catch { /* ignore */ }
   },
@@ -202,7 +209,7 @@ export const useDashboard = create<DashboardStore>((set, get) => ({
     set({ loading: 'teleop' })
     get().addLog('Starting teleoperation...')
     try {
-      await postJson(`${API}/session/teleop/start`)
+      await postJson(`${TELEOP}/start`)
       get().addLog('Teleoperation started', 'ok')
     } catch (e: unknown) {
       get().addLog(`Teleop start failed: ${(e as Error).message}`, 'err')
@@ -214,7 +221,7 @@ export const useDashboard = create<DashboardStore>((set, get) => ({
   doTeleopStop: async () => {
     get().addLog('Stopping teleoperation...')
     try {
-      await postJson(`${API}/session/teleop/stop`)
+      await postJson(`${TELEOP}/stop`)
       get().addLog('Teleoperation stopped', 'info')
     } catch (e: unknown) {
       get().addLog(`Teleop stop failed: ${(e as Error).message}`, 'err')
@@ -225,7 +232,7 @@ export const useDashboard = create<DashboardStore>((set, get) => ({
     set({ loading: 'record' })
     get().addLog(`Starting recording: ${params.task} (${params.num_episodes} episodes)`)
     try {
-      const data = await postJson(`${API}/session/record/start`, params)
+      const data = await postJson(`${RECORD}/start`, params)
       get().addLog(`Recording started: ${data.dataset_name}`, 'ok')
     } catch (e: unknown) {
       get().addLog(`Record start failed: ${(e as Error).message}`, 'err')
@@ -237,7 +244,7 @@ export const useDashboard = create<DashboardStore>((set, get) => ({
   doRecordStop: async () => {
     get().addLog('Stopping recording...')
     try {
-      await postJson(`${API}/session/record/stop`)
+      await postJson(`${RECORD}/stop`)
       get().addLog('Recording stopped', 'info')
       get().loadDatasets()
     } catch (e: unknown) {
@@ -250,7 +257,7 @@ export const useDashboard = create<DashboardStore>((set, get) => ({
   doSaveEpisode: async () => {
     get().addLog('Saving episode...')
     try {
-      await postJson(`${API}/session/episode/save`)
+      await postJson(`${RECORD}/episode/save`)
     } catch (e: unknown) {
       get().addLog(`Save episode failed: ${(e as Error).message}`, 'err')
     }
@@ -259,7 +266,7 @@ export const useDashboard = create<DashboardStore>((set, get) => ({
   doDiscardEpisode: async () => {
     get().addLog('Discarding episode...')
     try {
-      await postJson(`${API}/session/episode/discard`)
+      await postJson(`${RECORD}/episode/discard`)
       get().addLog('Discard signal sent', 'info')
     } catch (e: unknown) {
       get().addLog(`Discard episode failed: ${(e as Error).message}`, 'err')
@@ -269,7 +276,7 @@ export const useDashboard = create<DashboardStore>((set, get) => ({
   doSkipReset: async () => {
     get().addLog('Skipping reset wait...')
     try {
-      await postJson(`${API}/session/episode/skip-reset`)
+      await postJson(`${RECORD}/episode/skip-reset`)
       get().addLog('Skip signal sent', 'ok')
     } catch (e: unknown) {
       get().addLog(`Skip reset failed: ${(e as Error).message}`, 'err')
@@ -280,7 +287,7 @@ export const useDashboard = create<DashboardStore>((set, get) => ({
 
   fetchHardwareStatus: async () => {
     try {
-      const res = await fetch(`${API}/hardware-status`)
+      const res = await fetch(`${HARDWARE}/status`)
       if (!res.ok) return
       set({ hardwareStatus: await res.json() })
     } catch { /* ignore */ }
@@ -288,7 +295,7 @@ export const useDashboard = create<DashboardStore>((set, get) => ({
 
   loadDatasets: async () => {
     try {
-      const r = await api(`${API}/datasets`)
+      const r = await api(`${DATASETS}`)
       set({ datasets: Array.isArray(r) ? r : r.datasets || [] })
     } catch (e: unknown) {
       get().addLog(`Load datasets failed: ${(e as Error).message}`, 'err')
@@ -309,7 +316,7 @@ export const useDashboard = create<DashboardStore>((set, get) => ({
 
   fetchTroubleshootMap: async () => {
     try {
-      const res = await fetch(`${API}/troubleshoot-map`)
+      const res = await fetch(`${TROUBLESHOOT}/map`)
       if (!res.ok) return
       set({ troubleshootMap: await res.json() })
     } catch { /* ignore */ }
@@ -317,7 +324,7 @@ export const useDashboard = create<DashboardStore>((set, get) => ({
 
   fetchNetworkInfo: async () => {
     try {
-      const res = await fetch(`${API}/network-info`)
+      const res = await fetch(`${SYSTEM}/network`)
       if (!res.ok) return
       set({ networkInfo: await res.json() })
     } catch { /* ignore */ }
@@ -325,7 +332,7 @@ export const useDashboard = create<DashboardStore>((set, get) => ({
 
   recheckFault: async (faultType, deviceAlias) => {
     try {
-      const res = await fetch(`${API}/troubleshoot/recheck`, {
+      const res = await fetch(`${TROUBLESHOOT}/recheck`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ fault_type: faultType, device_alias: deviceAlias }),
@@ -338,7 +345,7 @@ export const useDashboard = create<DashboardStore>((set, get) => ({
   },
 
   generateSnapshot: async () => {
-    const res = await fetch(`${API}/troubleshoot/snapshot`, { method: 'POST' })
+    const res = await fetch(`${TROUBLESHOOT}/snapshot`, { method: 'POST' })
     return res.json()
   },
 
@@ -414,7 +421,7 @@ export const useDashboard = create<DashboardStore>((set, get) => ({
 
   startCalibration: async (armAlias) => {
     try {
-      const data = await postJson(`${API}/calibrate/start`, { arm_alias: armAlias })
+      const data = await postJson(`${CALIBRATION}/start`, { arm_alias: armAlias })
       set({ calibration: { state: data.state, arm_alias: data.arm_alias } })
     } catch (e: unknown) {
       set({ calibration: { state: 'idle', arm_alias: '', error: (e as Error).message } })
@@ -423,7 +430,7 @@ export const useDashboard = create<DashboardStore>((set, get) => ({
 
   setCalibrationHoming: async () => {
     try {
-      const data = await api(`${API}/calibrate/set-homing`, { method: 'POST' })
+      const data = await api(`${CALIBRATION}/homing`, { method: 'POST' })
       set((s) => ({
         calibration: { ...s.calibration, state: data.state, homing_offsets: data.homing_offsets },
       }))
@@ -432,7 +439,7 @@ export const useDashboard = create<DashboardStore>((set, get) => ({
 
   pollCalibrationPositions: async () => {
     try {
-      const data = await api(`${API}/calibrate/positions`)
+      const data = await api(`${CALIBRATION}/positions`)
       set((s) => ({
         calibration: { ...s.calibration, positions: data.positions, mins: data.mins, maxes: data.maxes },
       }))
@@ -441,7 +448,7 @@ export const useDashboard = create<DashboardStore>((set, get) => ({
 
   finishCalibration: async () => {
     try {
-      await postJson(`${API}/calibrate/finish`)
+      await postJson(`${CALIBRATION}/finish`)
       set({ calibration: { ...defaultCalibration, state: 'done' } })
       get().fetchHardwareStatus()
     } catch { /* ignore */ }
@@ -449,7 +456,7 @@ export const useDashboard = create<DashboardStore>((set, get) => ({
 
   cancelCalibration: async () => {
     try {
-      await postJson(`${API}/calibrate/cancel`)
+      await postJson(`${CALIBRATION}/cancel`)
     } catch { /* ignore */ }
     set({ calibration: { ...defaultCalibration } })
   },

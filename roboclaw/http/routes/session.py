@@ -24,22 +24,22 @@ class TeleopStartRequest(BaseModel):
 
 def register_session_routes(app: FastAPI, service: EmbodiedService) -> None:
 
-    @app.get("/api/dashboard/session/status")
+    @app.get("/api/session/status")
     async def session_status() -> dict[str, Any]:
         return service.get_status()
 
-    @app.post("/api/dashboard/session/teleop/start")
+    @app.post("/api/teleop/start")
     async def teleop_start(body: TeleopStartRequest | None = None) -> dict[str, str]:
         fps = body.fps if body else 30
         await service.start_teleop(fps=fps)
         return {"status": "teleoperating"}
 
-    @app.post("/api/dashboard/session/teleop/stop")
+    @app.post("/api/teleop/stop")
     async def teleop_stop() -> dict[str, str]:
         await service.stop()
         return {"status": "idle"}
 
-    @app.post("/api/dashboard/session/record/start")
+    @app.post("/api/record/start")
     async def record_start(body: RecordStartRequest) -> dict[str, Any]:
         dataset_name = await service.start_recording(
             task=body.task,
@@ -50,12 +50,12 @@ def register_session_routes(app: FastAPI, service: EmbodiedService) -> None:
         )
         return {"status": "recording", "dataset_name": dataset_name}
 
-    @app.post("/api/dashboard/session/record/stop")
+    @app.post("/api/record/stop")
     async def record_stop() -> dict[str, str]:
         await service.stop()
         return {"status": "idle"}
 
-    @app.post("/api/dashboard/session/episode/save")
+    @app.post("/api/record/episode/save")
     async def episode_save() -> dict[str, str]:
         try:
             await service.save_episode()
@@ -63,7 +63,7 @@ def register_session_routes(app: FastAPI, service: EmbodiedService) -> None:
             raise HTTPException(400, str(exc)) from exc
         return {"status": "episode_saved"}
 
-    @app.post("/api/dashboard/session/episode/discard")
+    @app.post("/api/record/episode/discard")
     async def episode_discard() -> dict[str, str]:
         try:
             await service.discard_episode()
@@ -71,7 +71,7 @@ def register_session_routes(app: FastAPI, service: EmbodiedService) -> None:
             raise HTTPException(400, str(exc)) from exc
         return {"status": "episode_discarded"}
 
-    @app.post("/api/dashboard/session/episode/skip-reset")
+    @app.post("/api/record/episode/skip-reset")
     async def episode_skip_reset() -> dict[str, str]:
         try:
             await service.skip_reset()
