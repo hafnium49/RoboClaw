@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { useSetup, ConfiguredArm, ConfiguredCamera, ConfiguredHand } from '../../controllers/setup'
+import { useDashboard } from '../../controllers/dashboard'
 import { useI18n } from '../../controllers/i18n'
 
 interface RowProps {
@@ -76,6 +77,7 @@ function dotColorForType(type: string): string {
 export default function DeviceList({ onCalibrate }: { onCalibrate?: (alias: string) => void } = {}) {
   const { devices, removeArm, renameArm, removeCamera, renameCamera, removeHand, renameHand } =
     useSetup()
+  const hwStatus = useDashboard((s) => s.hardwareStatus)
   const { t } = useI18n()
   const { arms, cameras, hands } = devices
 
@@ -92,43 +94,54 @@ export default function DeviceList({ onCalibrate }: { onCalibrate?: (alias: stri
 
   return (
     <div className="flex flex-col gap-4">
-      {arms.length > 0 && section(t('arm'), arms.map((a: ConfiguredArm) => (
-        <div key={a.alias} className="flex items-center gap-1">
-          <div className="flex-1">
-            <DeviceRow
-              alias={a.alias}
-              typeBadge={a.type}
-              dotColor={dotColorForType(a.type)}
-              statusTag={
-                a.calibrated
-                  ? { label: t('hwCalibrated'), color: 'bg-gn' }
-                  : { label: t('hwUncalibrated'), color: 'bg-yl' }
-              }
-              onRename={(n) => renameArm(a.alias, n)}
-              onRemove={() => removeArm(a.alias)}
-            />
+      {arms.length > 0 && section(t('arm'), arms.map((a: ConfiguredArm) => {
+        const live = hwStatus?.arms.find((h) => h.alias === a.alias)
+        const connected = live ? live.connected : true  // assume connected if no live data yet
+        const dotColor = !connected ? 'bg-rd' : dotColorForType(a.type)
+        const statusTag = !connected
+          ? { label: t('hwDisconnected'), color: 'bg-rd' }
+          : a.calibrated
+            ? { label: t('hwCalibrated'), color: 'bg-gn' }
+            : { label: t('hwUncalibrated'), color: 'bg-yl' }
+        return (
+          <div key={a.alias} className="flex items-center gap-1">
+            <div className="flex-1">
+              <DeviceRow
+                alias={a.alias}
+                typeBadge={a.type}
+                dotColor={dotColor}
+                statusTag={statusTag}
+                onRename={(n) => renameArm(a.alias, n)}
+                onRemove={() => removeArm(a.alias)}
+              />
+            </div>
+            {!a.calibrated && connected && onCalibrate && (
+              <button
+                onClick={() => onCalibrate(a.alias)}
+                className="shrink-0 px-2 py-1 text-2xs text-ac border border-ac/60 rounded hover:bg-ac/10"
+              >
+                {t('calibrate')}
+              </button>
+            )}
           </div>
-          {!a.calibrated && onCalibrate && (
-            <button
-              onClick={() => onCalibrate(a.alias)}
-              className="shrink-0 px-2 py-1 text-2xs text-ac border border-ac/60 rounded hover:bg-ac/10"
-            >
-              {t('calibrate')}
-            </button>
-          )}
-        </div>
-      )))}
+        )
+      }))}
 
-      {cameras.length > 0 && section(t('camera'), cameras.map((c: ConfiguredCamera) => (
-        <DeviceRow
-          key={c.alias}
-          alias={c.alias}
-          typeBadge={c.port}
-          dotColor="bg-ac"
-          onRename={(n) => renameCamera(c.alias, n)}
-          onRemove={() => removeCamera(c.alias)}
-        />
-      )))}
+      {cameras.length > 0 && section(t('camera'), cameras.map((c: ConfiguredCamera) => {
+        const live = hwStatus?.cameras.find((h) => h.alias === c.alias)
+        const connected = live ? live.connected : true
+        return (
+          <DeviceRow
+            key={c.alias}
+            alias={c.alias}
+            typeBadge={c.port}
+            dotColor={connected ? 'bg-ac' : 'bg-rd'}
+            statusTag={!connected ? { label: t('hwDisconnected'), color: 'bg-rd' } : null}
+            onRename={(n) => renameCamera(c.alias, n)}
+            onRemove={() => removeCamera(c.alias)}
+          />
+        )
+      }))}
 
       {hands.length > 0 && section(t('hand'), hands.map((h: ConfiguredHand) => (
         <DeviceRow
