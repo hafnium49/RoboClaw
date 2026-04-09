@@ -393,8 +393,9 @@ class SetupSession:
         category = EmbodimentCategory(self._embodiment_category)
         specs = models_for(category)
         if not specs:
-            self._set_result("not_supported")
-            return None
+            self._messages.append(t("notSupportedYet", lang))
+            self._embodiment_category = ""
+            return self._next_step_idle()
         options = [s.name.upper().replace("_", " ") for s in specs]
         n = len(options)
         return PromptStep(

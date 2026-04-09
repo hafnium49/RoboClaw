@@ -11,6 +11,10 @@
     "zh": "灵巧手",
     "en": "Dexterous Hand"
   },
+  "notSupportedYet": {
+    "zh": "该类型暂不支持，请选择其他类型。",
+    "en": "This type is not supported yet. Please select another type."
+  },
   "handSoon": {
     "zh": "灵巧手（即将支持）",
     "en": "Dexterous Hand (coming soon)"
