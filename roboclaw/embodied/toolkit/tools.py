@@ -366,7 +366,7 @@ class EmbodiedToolGroup(Tool):
         svc = _get_service(self.embodied_service)
         return await _run_with_service(
             svc,
-            lambda manifest: svc.calibration_session.calibrate(manifest, kwargs, self._tty_handoff),
+            lambda manifest: svc.calibration.calibrate(manifest, kwargs, self._tty_handoff),
         )
 
     async def _execute_teleop(self, kwargs: dict[str, Any]) -> str | list:

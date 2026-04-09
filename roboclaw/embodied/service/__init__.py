@@ -19,9 +19,7 @@ from roboclaw.embodied.service.session import (
     InferSession, RecordSession, ReplaySession, Session,
     TeleopSession, TrainSession,
 )
-from roboclaw.embodied.service.session.calibrate import (
-    CalibrationService, CalibrationSession as CalibrationCLI,
-)
+from roboclaw.embodied.service.session.calibrate import CalibrationSession
 from roboclaw.embodied.embodiment.doctor import DoctorService
 from roboclaw.embodied.service.session.setup import SetupSession
 
@@ -80,7 +78,7 @@ class EmbodiedService:
         self._recording_started = False
 
         # Sub-services
-        self.calibration = CalibrationService(self, board=self.board)
+        self.calibration = CalibrationSession(self)
         self.setup = SetupSession(self)
         self.teleop = TeleopSession(self)
         self.record = RecordSession(self)
@@ -88,7 +86,6 @@ class EmbodiedService:
         self.train = TrainSession(self)
         self.infer = InferSession(self)
         self.doctor = DoctorService(self)
-        self.calibration_session = CalibrationCLI(self)
 
     # -- Embodiment lock --
 
@@ -215,24 +212,6 @@ class EmbodiedService:
 
     # -- Calibration (delegated) --
 
-    async def start_calibration(self, arm_alias: str) -> dict[str, Any]:
-        return await self.calibration.start(arm_alias)
-
-    def get_calibration_status(self) -> dict[str, Any]:
-        return self.calibration.get_status()
-
-    async def set_calibration_homing(self) -> dict[str, Any]:
-        return await self.calibration.set_homing()
-
-    async def read_calibration_positions(self) -> dict[str, Any]:
-        return await self.calibration.read_positions()
-
-    async def finish_calibration(self) -> dict[str, Any]:
-        return await self.calibration.finish()
-
-    async def cancel_calibration(self) -> None:
-        await self.calibration.cancel()
-
     # -- Manifest mutations (kept identical) --
 
     def _require_not_busy(self) -> None:
@@ -321,8 +300,6 @@ class EmbodiedService:
     async def shutdown(self) -> None:
         if self._active_session and self._active_session.busy:
             await self.stop()
-        if self.calibration.active:
-            await self.calibration.cancel()
         if self.setup.motion_active:
             self.setup.stop_motion_detection()
         if self._monitor is not None:

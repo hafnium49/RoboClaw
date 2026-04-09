@@ -6,7 +6,6 @@ import { useDashboard } from '../controllers/dashboard'
 import { useI18n } from '../controllers/i18n'
 import DeviceList from '../components/setup/DeviceList'
 import DiscoveryWizard from '../components/setup/DiscoveryWizard'
-import { CalibrationWizard } from '../components/CalibrationWizard'
 import { TemperatureHeatMap } from '../components/TemperatureHeatMap'
 
 // Providers that make sense to show in the UI selector
@@ -40,9 +39,7 @@ export default function SettingsView() {
   const { t } = useI18n()
 
   const { wizardActive, startWizard, loadDevices, loadCatalog } = useSetup()
-  const { startCalibration, fetchHardwareStatus } = useDashboard()
-
-  const [showCalibration, setShowCalibration] = useState(false)
+  const { fetchHardwareStatus } = useDashboard()
 
   const [providerLoading, setProviderLoading] = useState(true)
   const [saving, setSaving] = useState(false)
@@ -76,7 +73,6 @@ export default function SettingsView() {
         setActiveProvider(payload.active_provider)
         setActiveModel(payload.default_model)
 
-        // Default selection: active provider, or custom
         const initial = payload.active_provider && uiProviders.some(p => p.name === payload.active_provider)
           ? payload.active_provider
           : 'custom'
@@ -104,11 +100,6 @@ export default function SettingsView() {
     setApiKey('')
     const p = providers.find(pr => pr.name === name)
     setApiBase(p?.api_base || '')
-  }
-
-  function handleCalibrate(alias: string) {
-    startCalibration(alias)
-    setShowCalibration(true)
   }
 
   async function handleSave(event: React.FormEvent) {
@@ -157,7 +148,7 @@ export default function SettingsView() {
             )}
           </div>
 
-          <DeviceList onCalibrate={handleCalibrate} />
+          <DeviceList />
           {wizardActive && <div className="mt-4"><DiscoveryWizard /></div>}
 
           <div className="mt-4">
@@ -169,7 +160,6 @@ export default function SettingsView() {
         <section className="bg-sf rounded-xl p-5 shadow-card shadow-inset-yl">
           <h3 className="text-sm font-bold text-tx uppercase tracking-wide mb-4">{t('settingsProvider')}</h3>
 
-          {/* Active status bar */}
           {activeProvider && (
             <div className="rounded-lg bg-bg border border-bd/50 p-3 mb-4 flex items-center gap-3 text-sm">
               <span className="text-tx3">{t('currentProvider')}:</span>
@@ -187,7 +177,6 @@ export default function SettingsView() {
           {providerLoading && <p className="text-tx3 text-sm">{t('loading')}</p>}
           {!providerLoading && (
             <>
-              {/* Provider grid */}
               <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-5 gap-2 mb-5">
                 {providers.map(p => {
                   const isSelected = p.name === selectedProvider
@@ -212,7 +201,6 @@ export default function SettingsView() {
                 })}
               </div>
 
-              {/* Config form for selected provider */}
               {selected && (
                 <form onSubmit={handleSave} className="space-y-4 border-t border-bd/30 pt-4">
                   {error && (
@@ -277,10 +265,6 @@ export default function SettingsView() {
           )}
         </section>
       </div>
-
-      {showCalibration && (
-        <CalibrationWizard onClose={() => { setShowCalibration(false); fetchHardwareStatus() }} />
-      )}
     </div>
   )
 }

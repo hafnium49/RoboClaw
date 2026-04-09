@@ -69,10 +69,9 @@ export interface NetworkInfo {
   lan_ip: string
 }
 
-export type CalibrationState = 'idle' | 'connected' | 'homing' | 'recording' | 'done'
-
-export interface CalibrationStatus {
-  state: CalibrationState
+// CalibrationStatus kept minimal for WebSocket event handling
+interface CalibrationStatus {
+  state: string
   arm_alias: string
   positions?: Record<string, number>
   mins?: Record<string, number>
@@ -149,13 +148,6 @@ interface DashboardStore {
   doInferStart: (params: { checkpoint_path?: string; source_dataset?: string; num_episodes?: number }) => Promise<void>
   doInferStop: () => Promise<void>
 
-  // Calibration
-  startCalibration: (armAlias: string) => Promise<void>
-  setCalibrationHoming: () => Promise<void>
-  pollCalibrationPositions: () => Promise<void>
-  finishCalibration: () => Promise<void>
-  cancelCalibration: () => Promise<void>
-
   // Events & logging
   handleDashboardEvent: (event: any) => void
   addLog: (message: string, cls?: 'info' | 'ok' | 'err') => void
@@ -172,7 +164,6 @@ const SYSTEM = '/api/system'
 const REPLAY = '/api/replay'
 const TRAIN = '/api/train'
 const INFER = '/api/infer'
-const CALIBRATION = '/api/calibration'
 
 // ---------------------------------------------------------------------------
 // Default session state
@@ -530,47 +521,4 @@ export const useDashboard = create<DashboardStore>((set, get) => ({
     }
   },
 
-  // -- Calibration --------------------------------------------------------
-
-  startCalibration: async (armAlias) => {
-    try {
-      const data = await postJson(`${CALIBRATION}/start`, { arm_alias: armAlias })
-      set({ calibration: { state: data.state, arm_alias: data.arm_alias } })
-    } catch (e: unknown) {
-      set({ calibration: { state: 'idle', arm_alias: '', error: (e as Error).message } })
-    }
-  },
-
-  setCalibrationHoming: async () => {
-    try {
-      const data = await api(`${CALIBRATION}/homing`, { method: 'POST' })
-      set((s) => ({
-        calibration: { ...s.calibration, state: data.state, homing_offsets: data.homing_offsets },
-      }))
-    } catch { /* ignore */ }
-  },
-
-  pollCalibrationPositions: async () => {
-    try {
-      const data = await api(`${CALIBRATION}/positions`)
-      set((s) => ({
-        calibration: { ...s.calibration, positions: data.positions, mins: data.mins, maxes: data.maxes },
-      }))
-    } catch { /* ignore */ }
-  },
-
-  finishCalibration: async () => {
-    try {
-      await postJson(`${CALIBRATION}/finish`)
-      set({ calibration: { ...defaultCalibration, state: 'done' } })
-      get().fetchHardwareStatus()
-    } catch { /* ignore */ }
-  },
-
-  cancelCalibration: async () => {
-    try {
-      await postJson(`${CALIBRATION}/cancel`)
-    } catch { /* ignore */ }
-    set({ calibration: { ...defaultCalibration } })
-  },
 }))
