@@ -10,6 +10,8 @@ from typing import Any
 class EmbodimentCategory(str, Enum):
     ARM = "arm"
     HAND = "hand"
+    HUMANOID = "humanoid"
+    MOBILE = "mobile"
 
 
 @dataclass(frozen=True)
