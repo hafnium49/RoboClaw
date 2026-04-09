@@ -101,7 +101,7 @@ function ScanStep() {
       <div className="flex justify-between pt-2">
         <button onClick={() => goToStep('select')} className={btnBack}>返回</button>
         <div className="flex gap-2">
-          {!scanning && !hasDevices && (
+          {!scanning && (
             <button onClick={doScan} className={btnOutline}>重新扫描</button>
           )}
           {!scanning && hasDevices && (
