@@ -699,7 +699,6 @@ def agent(
             _last_sigint_at = 0.0
             if _thinking:
                 _thinking.suspend()
-            _restore_terminal()
             _flush_pending_tty_input()
             console.print(f"\n[dim]Executing {label}...[/dim]")
         else:
