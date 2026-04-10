@@ -177,6 +177,8 @@ async def _print_interactive_line(text: str) -> None:
 
 async def _print_interactive_response(response: str, render_markdown: bool) -> None:
     """Print async interactive replies with prompt_toolkit-safe Rich styling."""
+    if _tty_handoff_active:
+        return
     def _write() -> None:
         content = response or ""
         ansi = _render_interactive_ansi(
@@ -246,6 +248,8 @@ def _print_cli_progress_line(text: str, thinking: _ThinkingSpinner | None) -> No
 
 async def _print_interactive_progress_line(text: str, thinking: _ThinkingSpinner | None) -> None:
     """Print an interactive progress line, pausing the spinner if needed."""
+    if _tty_handoff_active:
+        return
     with thinking.pause() if thinking else nullcontext():
         await _print_interactive_line(text)
 
