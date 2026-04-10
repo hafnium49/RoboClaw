@@ -230,6 +230,9 @@ class CalibrationSession(Session):
         display = arm.alias
         argv = CommandBuilder.calibrate(arm)
         await tty_handoff(start=True, label=f"Calibrating: {display}")
+        # Flush stdout so the subprocess's prompts render cleanly
+        import sys
+        sys.stdout.flush()
         try:
             rc, stderr_text = await runner.run_interactive(argv)
         finally:

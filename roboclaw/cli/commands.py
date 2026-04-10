@@ -702,6 +702,8 @@ def agent(
             _restore_terminal()
             _flush_pending_tty_input()
             console.print(f"\n[dim]Executing {label}...[/dim]")
+            sys.stdout.flush()
+            sys.stderr.flush()
         else:
             _tty_handoff_active = False
             _last_sigint_at = 0.0
