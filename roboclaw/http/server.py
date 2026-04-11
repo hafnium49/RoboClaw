@@ -142,6 +142,40 @@ def _register_system_routes(app: FastAPI, runtime: WebRuntime) -> None:
     async def save_provider_config(payload: dict[str, Any] = Body(...)) -> dict[str, Any]:
         return await _handle_save_provider(payload, runtime)
 
+    @app.get("/api/system/hf-config")
+    async def hf_config_status() -> dict[str, Any]:
+        config = load_config(get_config_path())
+        hf = config.huggingface
+        return {
+            "endpoint": hf.endpoint,
+            "masked_token": _mask_api_key(hf.token),
+            "proxy": hf.proxy,
+        }
+
+    @app.post("/api/system/hf-config")
+    async def save_hf_config(payload: dict[str, Any] = Body(...)) -> dict[str, Any]:
+        config = load_config(get_config_path())
+        hf = config.huggingface
+        endpoint = payload.get("endpoint")
+        if isinstance(endpoint, str):
+            hf.endpoint = endpoint.strip()
+        if payload.get("clear_token"):
+            hf.token = ""
+        else:
+            token = payload.get("token")
+            if isinstance(token, str) and token.strip():
+                hf.token = token.strip()
+        proxy = payload.get("proxy")
+        if isinstance(proxy, str):
+            hf.proxy = proxy.strip()
+        save_config(config, get_config_path())
+        return {
+            "status": "ok",
+            "endpoint": hf.endpoint,
+            "masked_token": _mask_api_key(hf.token),
+            "proxy": hf.proxy,
+        }
+
 
 async def _handle_save_provider(payload: dict[str, Any], runtime: WebRuntime) -> dict[str, Any]:
     """Apply provider config changes, swap provider atomically, refresh agent."""

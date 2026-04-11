@@ -12,7 +12,6 @@ export default function DataView() {
   const [trainDevice, setTrainDevice] = useState('cuda')
 
   // Hub state
-  const [hubToken, setHubToken] = useState('')
   const [pullDatasetRepo, setPullDatasetRepo] = useState('')
   const [pullPolicyRepo, setPullPolicyRepo] = useState('')
 
@@ -24,8 +23,8 @@ export default function DataView() {
   const promptPush = (type: 'dataset' | 'policy', name: string) => {
     const repoId = prompt(t('enterRepoId'))
     if (!repoId) return
-    if (type === 'dataset') store.pushDataset(name, repoId, hubToken)
-    else store.pushPolicy(name, repoId, hubToken)
+    if (type === 'dataset') store.pushDataset(name, repoId)
+    else store.pushPolicy(name, repoId)
   }
 
   return (
@@ -93,7 +92,7 @@ export default function DataView() {
               />
               <button
                 disabled={!pullDatasetRepo || !!hubLoading}
-                onClick={() => { store.pullDataset(pullDatasetRepo, '', hubToken); setPullDatasetRepo('') }}
+                onClick={() => { store.pullDataset(pullDatasetRepo); setPullDatasetRepo('') }}
                 className="px-3 py-1.5 bg-ac/10 text-ac rounded-lg text-sm font-medium
                   hover:bg-ac/20 transition-colors disabled:opacity-25 disabled:cursor-not-allowed"
               >
@@ -216,7 +215,7 @@ export default function DataView() {
                 />
                 <button
                   disabled={!pullPolicyRepo || !!hubLoading}
-                  onClick={() => { store.pullPolicy(pullPolicyRepo, '', hubToken); setPullPolicyRepo('') }}
+                  onClick={() => { store.pullPolicy(pullPolicyRepo); setPullPolicyRepo('') }}
                   className="px-3 py-1.5 bg-ac/10 text-ac rounded-lg text-sm font-medium
                     hover:bg-ac/20 transition-colors disabled:opacity-25 disabled:cursor-not-allowed"
                 >
@@ -242,20 +241,6 @@ export default function DataView() {
             )}
           </section>
 
-          {/* HF Token */}
-          <section className="bg-sf rounded-xl p-4 shadow-card">
-            <label className="flex flex-col gap-1 text-2xs text-tx3 font-mono">
-              {t('hubToken')}
-              <input
-                type="password"
-                placeholder={t('hubTokenPlaceholder')}
-                value={hubToken}
-                onChange={(e) => setHubToken(e.target.value)}
-                className="bg-bg border border-bd text-tx px-3 py-1.5 rounded-lg text-sm
-                  focus:outline-none focus:border-ac"
-              />
-            </label>
-          </section>
         </div>
       </div>
     </div>

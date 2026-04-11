@@ -159,10 +159,10 @@ interface DashboardStore {
   // Hub
   hubLoading: string | null
   hubProgress: { operation: string; progress_percent: number; total_bytes: number; done: boolean } | null
-  pushDataset: (name: string, repoId: string, token?: string) => Promise<void>
-  pullDataset: (repoId: string, name?: string, token?: string) => Promise<void>
-  pushPolicy: (name: string, repoId: string, token?: string) => Promise<void>
-  pullPolicy: (repoId: string, name?: string, token?: string) => Promise<void>
+  pushDataset: (name: string, repoId: string) => Promise<void>
+  pullDataset: (repoId: string, name?: string) => Promise<void>
+  pushPolicy: (name: string, repoId: string) => Promise<void>
+  pullPolicy: (repoId: string, name?: string) => Promise<void>
 
   // Events & logging
   handleDashboardEvent: (event: any) => void
@@ -545,11 +545,11 @@ export const useDashboard = create<DashboardStore>((set, get) => ({
 
   // -- Hub ----------------------------------------------------------------
 
-  pushDataset: async (name, repoId, token) => {
+  pushDataset: async (name, repoId) => {
     set({ hubLoading: 'pushDataset' })
     get().addLog(`Pushing dataset "${name}" → ${repoId}...`)
     try {
-      const data = await postJson(`${HUB}/datasets/push`, { name, repo_id: repoId, token: token || '' })
+      const data = await postJson(`${HUB}/datasets/push`, { name, repo_id: repoId })
       get().addLog(data.message || 'Dataset pushed', 'ok')
     } catch (e: unknown) {
       get().addLog(`Push dataset failed: ${(e as Error).message}`, 'err')
@@ -558,11 +558,11 @@ export const useDashboard = create<DashboardStore>((set, get) => ({
     }
   },
 
-  pullDataset: async (repoId, name, token) => {
+  pullDataset: async (repoId, name) => {
     set({ hubLoading: 'pullDataset', hubProgress: null })
     get().addLog(`Downloading dataset from ${repoId}...`)
     try {
-      const data = await postJson(`${HUB}/datasets/pull`, { repo_id: repoId, name: name || '', token: token || '' })
+      const data = await postJson(`${HUB}/datasets/pull`, { repo_id: repoId, name: name || '' })
       get().addLog(data.message || 'Dataset downloaded', 'ok')
       get().loadDatasets()
     } catch (e: unknown) {
@@ -572,11 +572,11 @@ export const useDashboard = create<DashboardStore>((set, get) => ({
     }
   },
 
-  pushPolicy: async (name, repoId, token) => {
+  pushPolicy: async (name, repoId) => {
     set({ hubLoading: 'pushPolicy' })
     get().addLog(`Pushing policy "${name}" → ${repoId}...`)
     try {
-      const data = await postJson(`${HUB}/policies/push`, { name, repo_id: repoId, token: token || '' })
+      const data = await postJson(`${HUB}/policies/push`, { name, repo_id: repoId })
       get().addLog(data.message || 'Policy pushed', 'ok')
     } catch (e: unknown) {
       get().addLog(`Push policy failed: ${(e as Error).message}`, 'err')
@@ -585,11 +585,11 @@ export const useDashboard = create<DashboardStore>((set, get) => ({
     }
   },
 
-  pullPolicy: async (repoId, name, token) => {
+  pullPolicy: async (repoId, name) => {
     set({ hubLoading: 'pullPolicy', hubProgress: null })
     get().addLog(`Downloading policy from ${repoId}...`)
     try {
-      const data = await postJson(`${HUB}/policies/pull`, { repo_id: repoId, name: name || '', token: token || '' })
+      const data = await postJson(`${HUB}/policies/pull`, { repo_id: repoId, name: name || '' })
       get().addLog(data.message || 'Policy downloaded', 'ok')
       get().fetchTrainPolicies()
     } catch (e: unknown) {

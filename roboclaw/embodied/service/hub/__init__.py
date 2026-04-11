@@ -25,6 +25,14 @@ class HubService:
     def __init__(self, parent: EmbodiedService) -> None:
         self._parent = parent
 
+    # ── Config ───────────────────────────────────────────────────────
+
+    def _hf_defaults(self) -> dict[str, str]:
+        """Load HuggingFace config (endpoint, token, proxy) from config.json."""
+        from roboclaw.config.loader import load_runtime_config
+        cfg = load_runtime_config().huggingface
+        return {"endpoint": cfg.endpoint, "token": cfg.token, "proxy": cfg.proxy}
+
     # ── Datasets ─────────────────────────────────────────────────────
 
     async def push_dataset(
@@ -32,7 +40,8 @@ class HubService:
     ) -> str:
         repo_id = kwargs["repo_id"]
         name = kwargs["name"]
-        token = kwargs.get("token", "")
+        defaults = self._hf_defaults()
+        token = kwargs.get("token", "") or defaults["token"]
         private = kwargs.get("private", False)
 
         local = dataset_path(manifest, name)
@@ -47,6 +56,8 @@ class HubService:
             token=token,
             private=private,
             ignore_patterns=["images/"],
+            endpoint=defaults["endpoint"],
+            proxy=defaults["proxy"],
         )
         return f"Dataset '{name}' pushed to {repo_id}\n{url}"
 
@@ -55,7 +66,8 @@ class HubService:
     ) -> str:
         repo_id = kwargs["repo_id"]
         name = kwargs.get("name", "") or repo_id.rsplit("/", 1)[-1]
-        token = kwargs.get("token", "")
+        defaults = self._hf_defaults()
+        token = kwargs.get("token", "") or defaults["token"]
 
         local = dataset_path(manifest, name)
         tqdm_cls = make_tqdm_class(self._parent.board, f"pull_dataset:{name}")
@@ -67,6 +79,8 @@ class HubService:
             local_dir=local,
             token=token,
             tqdm_class=tqdm_cls,
+            endpoint=defaults["endpoint"],
+            proxy=defaults["proxy"],
         )
         self._emit_done(f"pull_dataset:{name}")
         return f"Dataset '{name}' downloaded from {repo_id}"
@@ -78,7 +92,8 @@ class HubService:
     ) -> str:
         repo_id = kwargs["repo_id"]
         name = kwargs["name"]
-        token = kwargs.get("token", "")
+        defaults = self._hf_defaults()
+        token = kwargs.get("token", "") or defaults["token"]
         private = kwargs.get("private", False)
 
         local = policy_path(manifest, name)
@@ -92,6 +107,8 @@ class HubService:
             repo_type="model",
             token=token,
             private=private,
+            endpoint=defaults["endpoint"],
+            proxy=defaults["proxy"],
         )
         return f"Policy '{name}' pushed to {repo_id}\n{url}"
 
@@ -100,7 +117,8 @@ class HubService:
     ) -> str:
         repo_id = kwargs["repo_id"]
         name = kwargs.get("name", "") or repo_id.rsplit("/", 1)[-1]
-        token = kwargs.get("token", "")
+        defaults = self._hf_defaults()
+        token = kwargs.get("token", "") or defaults["token"]
 
         local = policy_path(manifest, name)
         tqdm_cls = make_tqdm_class(self._parent.board, f"pull_policy:{name}")
@@ -112,6 +130,8 @@ class HubService:
             local_dir=local,
             token=token,
             tqdm_class=tqdm_cls,
+            endpoint=defaults["endpoint"],
+            proxy=defaults["proxy"],
         )
         self._emit_done(f"pull_policy:{name}")
         return f"Policy '{name}' downloaded from {repo_id}"

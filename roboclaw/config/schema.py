@@ -151,6 +151,14 @@ class ToolsConfig(Base):
     mcp_servers: dict[str, MCPServerConfig] = Field(default_factory=dict)
 
 
+class HuggingFaceConfig(Base):
+    """HuggingFace Hub configuration."""
+
+    endpoint: str = ""  # Mirror URL, e.g. "https://hf-mirror.com". Empty = default huggingface.co
+    token: str = ""  # Global HF token (falls back to HF_TOKEN env / cached login)
+    proxy: str = ""  # Hub-only proxy URL, e.g. "http://127.0.0.1:7890"
+
+
 class Config(BaseSettings):
     """Root configuration for roboclaw."""
 
@@ -159,6 +167,7 @@ class Config(BaseSettings):
     providers: ProvidersConfig = Field(default_factory=ProvidersConfig)
     gateway: GatewayConfig = Field(default_factory=GatewayConfig)
     tools: ToolsConfig = Field(default_factory=ToolsConfig)
+    huggingface: HuggingFaceConfig = Field(default_factory=HuggingFaceConfig)
 
     @property
     def workspace_path(self) -> Path:

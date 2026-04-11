@@ -8,7 +8,7 @@ import DeviceList from '../components/setup/DeviceList'
 import DiscoveryWizard from '../components/setup/DiscoveryWizard'
 import { TemperatureHeatMap } from '../components/TemperatureHeatMap'
 import { CalibrationPanel } from '../components/CalibrationPanel'
-import { postJson } from '../controllers/api'
+import { api, postJson } from '../controllers/api'
 
 // Providers that make sense to show in the UI selector
 const UI_PROVIDERS = [
@@ -66,6 +66,16 @@ export default function SettingsView() {
   const [apiKey, setApiKey] = useState('')
   const [apiBase, setApiBase] = useState('')
 
+  // HF config state
+  const [hfEndpoint, setHfEndpoint] = useState('')
+  const [hfEndpointMode, setHfEndpointMode] = useState<'default' | 'mirror' | 'custom'>('default')
+  const [hfToken, setHfToken] = useState('')
+  const [hfMaskedToken, setHfMaskedToken] = useState('')
+  const [hfProxy, setHfProxy] = useState('')
+  const [hfSaving, setHfSaving] = useState(false)
+  const [hfNotice, setHfNotice] = useState('')
+  const [hfError, setHfError] = useState('')
+
   useEffect(() => {
     loadDevices()
     loadCatalog()
@@ -98,6 +108,22 @@ export default function SettingsView() {
       }
     }
     loadProvider()
+
+    async function loadHfConfig() {
+      try {
+        const data = await api('/api/system/hf-config')
+        if (cancelled) return
+        const ep = data.endpoint || ''
+        setHfEndpoint(ep)
+        setHfEndpointMode(
+          ep === '' ? 'default' :
+          ep === 'https://hf-mirror.com' ? 'mirror' : 'custom'
+        )
+        setHfMaskedToken(data.masked_token || '')
+        setHfProxy(data.proxy || '')
+      } catch (e) { console.warn('Failed to load HF config', e) }
+    }
+    loadHfConfig()
 
     return () => {
       cancelled = true
@@ -133,6 +159,33 @@ export default function SettingsView() {
       setError(saveError instanceof Error ? saveError.message : 'Failed to save settings.')
     } finally {
       setSaving(false)
+    }
+  }
+
+  function handleHfEndpointMode(mode: 'default' | 'mirror' | 'custom') {
+    setHfEndpointMode(mode)
+    if (mode === 'default') setHfEndpoint('')
+    else if (mode === 'mirror') setHfEndpoint('https://hf-mirror.com')
+  }
+
+  async function handleHfSave() {
+    setHfSaving(true)
+    setHfNotice('')
+    setHfError('')
+    try {
+      const data = await postJson('/api/system/hf-config', {
+        endpoint: hfEndpoint,
+        token: hfToken,
+        proxy: hfProxy,
+      })
+      setHfMaskedToken(data.masked_token || '')
+      setHfToken('')
+      setHfNotice(t('hfSaved'))
+      setTimeout(() => setHfNotice(''), 3000)
+    } catch (e) {
+      setHfError(e instanceof Error ? e.message : t('saveSettings'))
+    } finally {
+      setHfSaving(false)
     }
   }
 
@@ -287,6 +340,84 @@ export default function SettingsView() {
               )}
             </>
           )}
+        </section>
+
+        {/* HuggingFace Hub config */}
+        <section className="bg-sf rounded-xl p-5 shadow-card shadow-inset-gn col-span-2 max-[900px]:col-span-1">
+          <h3 className="text-sm font-bold text-tx uppercase tracking-wide mb-4">{t('hfConfig')}</h3>
+
+          <div className="grid grid-cols-3 gap-4 max-[900px]:grid-cols-1">
+            {/* Endpoint */}
+            <div className="space-y-2">
+              <label className="text-xs text-tx2 font-medium">{t('hfEndpoint')}</label>
+              <div className="flex flex-col gap-1.5">
+                {(['default', 'mirror', 'custom'] as const).map(mode => (
+                  <button
+                    key={mode}
+                    onClick={() => handleHfEndpointMode(mode)}
+                    className={`px-3 py-2 rounded-lg text-sm text-left transition-all border
+                      ${hfEndpointMode === mode
+                        ? 'border-ac bg-ac/10 text-ac font-semibold'
+                        : 'border-bd/40 bg-bg text-tx2 hover:border-bd'}`}
+                  >
+                    {mode === 'default' ? t('hfDefault') : mode === 'mirror' ? t('hfMirror') : t('hfCustomEndpoint')}
+                  </button>
+                ))}
+              </div>
+              {hfEndpointMode === 'custom' && (
+                <input
+                  value={hfEndpoint}
+                  onChange={(e) => setHfEndpoint(e.target.value)}
+                  placeholder="https://..."
+                  className="w-full bg-bg border border-bd text-tx px-3 py-2 rounded-lg text-sm
+                    focus:outline-none focus:border-ac"
+                />
+              )}
+            </div>
+
+            {/* Token */}
+            <div className="space-y-2">
+              <label className="text-xs text-tx2 font-medium">{t('hfToken')}</label>
+              {hfMaskedToken && (
+                <div className="text-xs text-tx3 font-mono bg-bg rounded px-2 py-1 border border-bd/30">
+                  {hfMaskedToken}
+                </div>
+              )}
+              <input
+                type="password"
+                value={hfToken}
+                onChange={(e) => setHfToken(e.target.value)}
+                placeholder={t('hfTokenPlaceholder')}
+                className="w-full bg-bg border border-bd text-tx px-3 py-2 rounded-lg text-sm
+                  focus:outline-none focus:border-ac"
+              />
+            </div>
+
+            {/* Proxy */}
+            <div className="space-y-2">
+              <label className="text-xs text-tx2 font-medium">{t('hfProxy')}</label>
+              <input
+                value={hfProxy}
+                onChange={(e) => setHfProxy(e.target.value)}
+                placeholder={t('hfProxyPlaceholder')}
+                className="w-full bg-bg border border-bd text-tx px-3 py-2 rounded-lg text-sm
+                  focus:outline-none focus:border-ac"
+              />
+            </div>
+          </div>
+
+          <div className="mt-4 flex items-center gap-3">
+            <button
+              onClick={handleHfSave}
+              disabled={hfSaving}
+              className="bg-gn text-white px-5 py-2 rounded-lg text-sm font-semibold transition-all
+                hover:bg-gn/90 active:scale-[0.97] disabled:opacity-30 shadow-glow-gn"
+            >
+              {hfSaving ? t('saving') : t('saveSettings')}
+            </button>
+            {hfNotice && <span className="text-xs text-gn">{hfNotice}</span>}
+            {hfError && <span className="text-xs text-rd">{hfError}</span>}
+          </div>
         </section>
       </div>
     </div>

@@ -144,10 +144,20 @@ const translations = {
     repoIdPlaceholder: 'HuggingFace 仓库 ID (如 user/name)',
     download: '下载',
     downloading: '下载中...',
-    hubToken: 'HF Token (可选)',
-    hubTokenPlaceholder: '留空使用环境变量或缓存的 token',
     enterRepoId: '请输入 HuggingFace 仓库 ID',
     downloadPolicy: '下载模型',
+
+    // HF Config (Settings)
+    hfConfig: 'HuggingFace Hub',
+    hfEndpoint: '镜像地址',
+    hfToken: 'HF Token',
+    hfTokenPlaceholder: '留空使用环境变量或缓存的 token',
+    hfProxy: 'Hub 代理',
+    hfProxyPlaceholder: '如 http://127.0.0.1:7890',
+    hfDefault: '默认 (huggingface.co)',
+    hfMirror: '国内镜像 (hf-mirror.com)',
+    hfCustomEndpoint: '自定义',
+    hfSaved: '已保存',
 
     // Hardware
     hwReady: '硬件就绪',
@@ -366,11 +376,20 @@ const translations = {
     repoIdPlaceholder: 'HuggingFace repo ID (e.g. user/name)',
     download: 'Download',
     downloading: 'Downloading...',
-    uploading: 'Uploading...',
-    hubToken: 'HF Token (optional)',
-    hubTokenPlaceholder: 'Leave empty to use env or cached token',
     enterRepoId: 'Enter HuggingFace repo ID',
     downloadPolicy: 'Download Policy',
+
+    // HF Config (Settings)
+    hfConfig: 'HuggingFace Hub',
+    hfEndpoint: 'Endpoint',
+    hfToken: 'HF Token',
+    hfTokenPlaceholder: 'Leave empty to use env or cached token',
+    hfProxy: 'Hub Proxy',
+    hfProxyPlaceholder: 'e.g. http://127.0.0.1:7890',
+    hfDefault: 'Default (huggingface.co)',
+    hfMirror: 'China Mirror (hf-mirror.com)',
+    hfCustomEndpoint: 'Custom',
+    hfSaved: 'Saved',
 
     // Hardware
     hwReady: 'Hardware Ready',
