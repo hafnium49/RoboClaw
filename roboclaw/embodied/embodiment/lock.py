@@ -43,6 +43,8 @@ class EmbodimentFileLock:
 
     def acquire_exclusive(self, owner: str) -> None:
         """Acquire exclusive lock. Raises ``EmbodimentBusyError`` on failure."""
+        # Release our own shared lock first — same-process shared fd blocks exclusive
+        self.release_shared()
         fd = os.open(str(self._path), os.O_RDWR | os.O_CREAT)
         try:
             fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
