@@ -81,6 +81,7 @@ export default function ControlView() {
       if (document.visibilityState === 'visible') {
         store.fetchHardwareStatus()
         store.fetchSessionStatus()
+        store.loadDatasets()
       }
     }, 5000)
     return () => clearInterval(pollInterval)
@@ -379,20 +380,30 @@ export default function ControlView() {
             <h3 className="text-2xs text-tx3 font-mono uppercase tracking-widest mb-3">{t('replay')}</h3>
             <select
               value={replayDataset}
-              onChange={(e) => setReplayDataset(e.target.value)}
+              onChange={(e) => { setReplayDataset(e.target.value); setReplayEpisode(0) }}
               className="w-full bg-sf2 border border-bd text-tx px-2 py-1.5 rounded text-sm mb-2
                 focus:outline-none focus:border-ac"
             >
               <option value="">{t('selectDataset')}</option>
               {datasets.map(d => (
-                <option key={d.name} value={d.name}>{d.name}</option>
+                <option key={d.name} value={d.name}>
+                  {d.name} {d.total_episodes ? `(${d.total_episodes} ep)` : ''}
+                </option>
               ))}
             </select>
-            <label className="flex flex-col gap-1 text-2xs text-tx3 font-mono mb-2">
-              {t('episode')}
-              <input type="number" value={replayEpisode} onChange={(e) => setReplayEpisode(Number(e.target.value) || 0)} min={0}
-                className="bg-sf2 border border-bd text-tx px-2 py-1.5 rounded text-sm font-mono focus:outline-none focus:border-ac" />
-            </label>
+            {(() => {
+              const sel = datasets.find(d => d.name === replayDataset)
+              const maxEp = (sel?.total_episodes ?? 1) - 1
+              return (
+                <label className="flex flex-col gap-1 text-2xs text-tx3 font-mono mb-2">
+                  {t('episode')} {sel ? `(0-${maxEp})` : ''}
+                  <input type="number" value={replayEpisode}
+                    onChange={(e) => setReplayEpisode(Math.min(Number(e.target.value) || 0, maxEp))}
+                    min={0} max={maxEp}
+                    className="bg-sf2 border border-bd text-tx px-2 py-1.5 rounded text-sm font-mono focus:outline-none focus:border-ac" />
+                </label>
+              )
+            })()}
             <div className="space-y-2">
               <ActionBtn color="gn" disabled={!ok.replayStart || !replayDataset || !!loading}
                 onClick={() => store.doReplayStart({ dataset_name: replayDataset, episode: replayEpisode })}
