@@ -171,9 +171,9 @@ class EmbodiedService:
             arms=arms,
         )
         self.acquire_embodiment("recording")
-        await self.board.update(target_episodes=num_episodes, dataset=dataset_name)
         self._active_session = self.record
         await self.record.start(argv)
+        await self.board.update(target_episodes=num_episodes, dataset=dataset_name)
         self._recording_started = True
         if self._monitor is not None:
             self._monitor.set_recording_active(True)
