@@ -1,0 +1,70 @@
+ ▐▛███▜▌   Claude Code v2.1.89
+▝▜█████▛▘  Opus 4.6 (1M context) · Claude Max
+  ▘▘ ▝▝    ~/Workspace/Project/embodied_ai/claw/RoboClaw-worktree
+
+⏺ Bash(sshpass -p 'zhaobo666' scp -o StrictHostKeyChecking=no -o
+      PubkeyAuthentication=no /tmp/run_policy_by_evorl.py
+      zhaobo@192.168.31.127:/tmp/run_policy_by_evorl.py…)
+  ⎿  uploaded
+
+⏺ 已更新，加了
+  --dataset.episode_time_s=500。下次运行生效，当前这次需要手动停掉再重跑。
+
+✻ Brewed for 33s
+
+❯ 你把127的摄像头，通过http，让我在我本机的浏览器，就能看到这3个摄像头          
+
+⏺ Write(/tmp/cam_server.py)
+  ⎿  Wrote 80 lines to ../../../../../../../tmp/cam_server.py
+       1 """Simple HTTP MJPEG server for 3 cameras on 4060-127."""
+       2 import cv2
+       3 import threading
+       4 from http.server import HTTPServer, BaseHTTPRequestHandler
+       5 
+       6 CAMERAS = {
+       7     "left_wrist": "/dev/v4l/by-path/pci-0000:00:14.0-usb-0:4:1.0
+         -video-index0",
+       8     "right_wrist": "/dev/v4l/by-path/pci-0000:00:14.0-usb-0:1:1.
+         0-video-index0",
+       9     "top": "/dev/v4l/by-path/pci-0000:00:14.0-usb-0:3:1.0-video-
+         index0",
+      10 }
+     … +70 lines (ctrl+o to expand)
+
+⏺ Bash(sshpass -p 'zhaobo666' scp -o StrictHostKeyChecking=no -o
+      PubkeyAuthentication=no /tmp/cam_server.py
+      zhaobo@192.168.31.127:/tmp/cam_server.py && sshpass -p 'zha…)
+  ⎿  (No output)
+
+⏺ Bash(sleep 3 && sshpass -p 'zhaobo666' ssh -o StrictHostKeyChecking=no -o
+      PubkeyAuthentication=no zhaobo@192.168.31.127 'tmux capture-pane -t
+      test:cam -p | tail -5')
+  ⎿  (No output)
+
+⏺ Bash(sshpass -p 'zhaobo666' ssh -o StrictHostKeyChecking=no -o
+      PubkeyAuthentication=no zhaobo@192.168.31.127 'tmux capture-pane -t
+      test:cam -p -S -5')
+  ⎿  source /home/zhaobo/miniconda3/etc/profile.d/conda.sh && conda activat
+     e roboclaw && python3 /tmp/cam_server.py
+     (base) zhaobo@zhaobo-MS-7D90:~$ source /home/zhaobo/miniconda3/etc/pro
+     … +4 lines (ctrl+o to expand)
+
+⏺ 摄像头服务已启动。打开浏览器访问：
+
+  http://192.168.31.127:8888
+
+  可以看到 3 个摄像头的实时画面（left_wrist、right_wrist、top）。
+
+  注意：如果推理正在跑且占用了摄像头设备，可能会打不开。摄像头在 Linux
+  上通常不能被两个进程同时占用。
+
+✻ Worked for 1m 13s
+
+❯ 只有 left wrist                                                               
+
+⏺ 摄像头被推理进程占用了，只有 left_wrist
+  没被占（可能是因为推理只打开了部分摄像头，或者 left_wrist
+  的设备路径和推理用的不同）。
+
+  推理在跑的时候，摄像头没法共享。要看所有 3
+  个摄像头的话，需要先停推理。要不等推理结束后再看？或者你只需要看推理时的画面？
