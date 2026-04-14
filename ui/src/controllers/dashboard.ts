@@ -71,6 +71,13 @@ export interface Dataset {
   fps?: number
 }
 
+export interface Policy {
+  name: string
+  checkpoint: string
+  dataset?: string
+  steps?: number
+}
+
 export interface NetworkInfo {
   host: string
   port: number
@@ -133,6 +140,7 @@ interface DashboardStore {
   // Hardware & datasets
   fetchHardwareStatus: () => Promise<void>
   loadDatasets: () => Promise<void>
+  loadPolicies: () => Promise<void>
   deleteDataset: (name: string) => Promise<void>
 
   // Troubleshooting
@@ -150,9 +158,8 @@ interface DashboardStore {
   doTrainStart: (params: { dataset_name: string; steps?: number; device?: string }) => Promise<void>
   fetchTrainStatus: (jobId: string) => Promise<void>
   fetchTrainDatasets: () => Promise<void>
-  fetchTrainPolicies: () => Promise<void>
   trainJobMessage: string
-  policies: any[]
+  policies: Policy[]
 
   // Inference
   doInferStart: (params: { checkpoint_path?: string; source_dataset?: string; num_episodes?: number }) => Promise<void>
@@ -177,6 +184,7 @@ const TELEOP = '/api/teleop'
 const RECORD = '/api/record'
 const HARDWARE = '/api/hardware'
 const DATASETS = '/api/datasets'
+const POLICIES = '/api/policies'
 const TROUBLESHOOT = '/api/troubleshoot'
 const SYSTEM = '/api/system'
 const REPLAY = '/api/replay'
@@ -345,6 +353,15 @@ export const useDashboard = create<DashboardStore>((set, get) => ({
       set({ datasets: Array.isArray(r) ? r : r.datasets || [] })
     } catch (e: unknown) {
       get().addLog(`Load datasets failed: ${(e as Error).message}`, 'err')
+    }
+  },
+
+  loadPolicies: async () => {
+    try {
+      const r = await api(`${POLICIES}`)
+      set({ policies: Array.isArray(r) ? r : r.policies || [] })
+    } catch (e: unknown) {
+      get().addLog(`Load policies failed: ${(e as Error).message}`, 'err')
     }
   },
 
@@ -534,19 +551,6 @@ export const useDashboard = create<DashboardStore>((set, get) => ({
     } catch { /* ignore */ }
   },
 
-  fetchTrainPolicies: async () => {
-    try {
-      const data = await api(`${TRAIN}/policies`)
-      const msg = data.message || '[]'
-      try {
-        const parsed = JSON.parse(msg)
-        set({ policies: Array.isArray(parsed) ? parsed : [] })
-      } catch {
-        set({ policies: [] })
-      }
-    } catch { /* ignore */ }
-  },
-
   // -- Hub ----------------------------------------------------------------
 
   pushDataset: async (name, repoId) => {
@@ -595,7 +599,7 @@ export const useDashboard = create<DashboardStore>((set, get) => ({
     try {
       const data = await postJson(`${HUB}/policies/pull`, { repo_id: repoId, name: name || '' })
       get().addLog(data.message || 'Policy downloaded', 'ok')
-      get().fetchTrainPolicies()
+      get().loadPolicies()
     } catch (e: unknown) {
       get().addLog(`Pull policy failed: ${(e as Error).message}`, 'err')
     } finally {
