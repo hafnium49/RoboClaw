@@ -168,6 +168,9 @@ const translations = {
     // Hardware
     hwReady: '硬件就绪',
     hwNotReady: '硬件未就绪',
+    noHardwareDetected: '未检测到硬件',
+    noHardwareHint: '请连接机械臂或摄像头，然后前往设置页面进行配置。',
+    goToSettings: '前往设置',
     hwUncalibrated: '未校准',
     hwConnected: '已连接',
     hwDisconnected: '未连接',
@@ -484,6 +487,9 @@ const translations = {
     // Hardware
     hwReady: 'Hardware Ready',
     hwNotReady: 'Hardware Not Ready',
+    noHardwareDetected: 'No hardware detected',
+    noHardwareHint: 'Connect arms or cameras, then go to Settings to set them up.',
+    goToSettings: 'Go to Settings',
     hwUncalibrated: 'Uncalibrated',
     hwConnected: 'Connected',
     hwDisconnected: 'Disconnected',

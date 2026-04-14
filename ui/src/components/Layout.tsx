@@ -1,4 +1,4 @@
-import { Link, Outlet, useLocation, useNavigate } from 'react-router-dom'
+import { Link, Outlet, useLocation } from 'react-router-dom'
 import { useEffect, useState } from 'react'
 import { useWebSocket } from '../controllers/connection'
 import { useDashboard } from '../controllers/dashboard'
@@ -13,7 +13,6 @@ function cn(...values: Array<string | false | null | undefined>) {
 
 export default function Layout() {
   const location = useLocation()
-  const navigate = useNavigate()
   const { connect, disconnect, connected, messages } = useWebSocket()
   const { fetchHardwareStatus } = useDashboard()
   const { t } = useI18n()
@@ -25,19 +24,9 @@ export default function Layout() {
     return () => disconnect()
   }, [connect, disconnect])
 
-  // Auto-redirect to setup page when no hardware is configured
   useEffect(() => {
-    fetchHardwareStatus().then(() => {
-      const hs = useDashboard.getState().hardwareStatus
-      const shouldGuardControlRoute =
-        location.pathname === '/'
-        || location.pathname === '/control'
-        || location.pathname === '/dashboard'
-      if (shouldGuardControlRoute && hs && hs.arms.length === 0 && hs.cameras.length === 0) {
-        navigate('/settings')
-      }
-    })
-  }, [fetchHardwareStatus, location.pathname, navigate])
+    fetchHardwareStatus()
+  }, [fetchHardwareStatus, location.pathname])
 
   const navItems = [
     { path: '/control', label: t('controlCenter') },
