@@ -84,6 +84,25 @@ export interface NetworkInfo {
   lan_ip: string
 }
 
+export interface TrainingCurvePoint {
+  step: string
+  ep: number
+  epoch: number
+  loss: number
+}
+
+export interface TrainingCurve {
+  job_id: string
+  log_path: string
+  exists: boolean
+  points: TrainingCurvePoint[]
+  last_epoch: number | null
+  last_loss: number | null
+  best_ep: number | null
+  best_loss: number | null
+  updated_at: number | null
+}
+
 interface CalibrationStatus {
   state: string
   arm_alias: string
@@ -160,6 +179,9 @@ interface DashboardStore {
   fetchTrainDatasets: () => Promise<void>
   trainJobMessage: string
   policies: Policy[]
+  trainCurve: TrainingCurve | null
+  fetchTrainCurve: (jobId: string) => Promise<void>
+  clearTrainCurve: () => void
 
   // Inference
   doInferStart: (params: { checkpoint_path?: string; num_episodes?: number; episode_time_s?: number }) => Promise<void>
@@ -232,6 +254,7 @@ export const useDashboard = create<DashboardStore>((set, get) => ({
   calibration: { ...defaultCalibration },
   trainJobMessage: '',
   policies: [],
+  trainCurve: null,
   hubLoading: null,
   hubProgress: null,
 
@@ -549,6 +572,30 @@ export const useDashboard = create<DashboardStore>((set, get) => ({
     try {
       await get().loadDatasets()
     } catch { /* ignore */ }
+  },
+
+  fetchTrainPolicies: async () => {
+    try {
+      const data = await api(`${TRAIN}/policies`)
+      const msg = data.message || '[]'
+      try {
+        const parsed = JSON.parse(msg)
+        set({ policies: Array.isArray(parsed) ? parsed : [] })
+      } catch {
+        set({ policies: [] })
+      }
+    } catch { /* ignore */ }
+  },
+
+  fetchTrainCurve: async (jobId) => {
+    try {
+      const data = await api(`${TRAIN}/curve/${encodeURIComponent(jobId)}`) as TrainingCurve
+      set({ trainCurve: data })
+    } catch { /* preserve old data on transient errors */ }
+  },
+
+  clearTrainCurve: () => {
+    set({ trainCurve: null })
   },
 
   // -- Hub ----------------------------------------------------------------

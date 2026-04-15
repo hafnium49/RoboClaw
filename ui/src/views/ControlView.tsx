@@ -4,6 +4,7 @@ import { useDashboard, type SessionState } from '../controllers/dashboard'
 import { useI18n } from '../controllers/i18n'
 import { CameraPreviewPanel } from '../components/CameraPreviewPanel'
 import { ServoPanel } from '../components/ServoPanel'
+import { LossCurvePanel } from '../components/LossCurvePanel'
 
 function canDo(state: SessionState, hwReady: boolean) {
   const canStart = state === 'idle' || state === 'error'
@@ -102,7 +103,6 @@ export default function ControlView() {
     }, 5000)
     return () => clearInterval(pollInterval)
   }, [])
-
 
   const stateLabel: Record<string, string> = {
     preparing: t('hwInitializing'),
@@ -517,8 +517,8 @@ export default function ControlView() {
           </div>
         </div>
 
-        {/* Bottom: Camera + Servo monitoring */}
-        <div className="grid grid-cols-2 gap-3 min-h-[240px] max-[900px]:grid-cols-1">
+        {/* Bottom: Camera + Servo monitoring + Loss curve */}
+        <div className="grid grid-cols-3 gap-3 min-h-[240px] max-[1200px]:grid-cols-2 max-[900px]:grid-cols-1">
           {camerasExist ? (
             <CameraPreviewPanel cameras={hwStatus!.cameras} busy={busy} />
           ) : (
@@ -527,6 +527,7 @@ export default function ControlView() {
             </div>
           )}
           <ServoPanel state={state} />
+          <LossCurvePanel />
         </div>
       </div>
     </div>
