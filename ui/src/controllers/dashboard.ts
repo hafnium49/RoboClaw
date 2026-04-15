@@ -570,9 +570,7 @@ export const useDashboard = create<DashboardStore>((set, get) => ({
     try {
       const data = await api(`${TRAIN}/curve/${encodeURIComponent(jobId)}`) as TrainingCurve
       set({ trainCurve: data })
-    } catch {
-      set({ trainCurve: null })
-    }
+    } catch { /* preserve old data on transient errors */ }
   },
 
   clearTrainCurve: () => {

@@ -55,30 +55,30 @@ class TrainSession:
         status = await SubprocessExecutor().job_status(job_id=job_id, log_dir=logs_dir())
         return "\n".join(f"{key}: {value}" for key, value in status.items())
 
-    def curve_data(
-        self,
-        manifest: Manifest,
-        kwargs: dict[str, Any],
-        tty_handoff: Any,
-    ) -> dict[str, Any]:
-        del manifest, tty_handoff
-
-        job_id = str(kwargs.get("job_id", "")).strip()
+    def curve_data(self, job_id: str) -> dict[str, Any]:
+        job_id = job_id.strip()
         if not _JOB_ID_RE.fullmatch(job_id):
             raise ValueError("Invalid job_id.")
 
-        log_path = logs_dir() / f"{job_id}.log"
+        from roboclaw.embodied.executor import SubprocessExecutor
+        log_path = SubprocessExecutor()._job_log_path(job_id, logs_dir())
+
+        try:
+            mtime: float | None = log_path.stat().st_mtime
+        except FileNotFoundError:
+            mtime = None
+
         best, points = _parse_training_curve(job_id, log_path)
         return {
             "job_id": job_id,
             "log_path": str(log_path),
-            "exists": log_path.exists(),
+            "exists": mtime is not None,
             "points": points,
             "last_epoch": points[-1]["epoch"] if points else None,
             "last_loss": points[-1]["loss"] if points else None,
             "best_ep": best["ep"] if best else None,
             "best_loss": best["loss"] if best else None,
-            "updated_at": log_path.stat().st_mtime if log_path.exists() else None,
+            "updated_at": mtime,
         }
 
     # ── Listing utilities ────────────────────────────────────────────────
@@ -169,6 +169,14 @@ _MAX_CACHED_JOBS = 50
 _BEST_LOSS_BY_JOB: dict[str, dict[str, float | int]] = {}
 
 
+def _update_best(
+    best: dict[str, float | int] | None, loss: float, ep: int,
+) -> dict[str, float | int]:
+    if best is None or loss < best["loss"] or (loss == best["loss"] and ep < best["ep"]):
+        return {"loss": loss, "ep": ep}
+    return best
+
+
 def _parse_training_curve(job_id: str, log_path: Path) -> tuple[dict[str, float | int] | None, list[dict[str, Any]]]:
     if not log_path.exists():
         return _BEST_LOSS_BY_JOB.get(job_id), []
@@ -200,10 +208,7 @@ def _parse_training_curve(job_id: str, log_path: Path) -> tuple[dict[str, float 
                 if point is None:
                     continue
                 points.appendleft(point)
-                loss = point["loss"]
-                ep = point["ep"]
-                if best is None or loss < best["loss"] or (loss == best["loss"] and ep < best["ep"]):
-                    best = {"loss": loss, "ep": ep}
+                best = _update_best(best, point["loss"], point["ep"])
                 if len(points) >= _MAX_CURVE_POINTS:
                     break
 
@@ -211,10 +216,7 @@ def _parse_training_curve(job_id: str, log_path: Path) -> tuple[dict[str, float 
             point = _parse_training_curve_line(remainder.decode("utf-8", errors="replace"))
             if point is not None:
                 points.appendleft(point)
-                loss = point["loss"]
-                ep = point["ep"]
-                if best is None or loss < best["loss"] or (loss == best["loss"] and ep < best["ep"]):
-                    best = {"loss": loss, "ep": ep}
+                best = _update_best(best, point["loss"], point["ep"])
 
     points_list = list(points)
     if best is not None:
