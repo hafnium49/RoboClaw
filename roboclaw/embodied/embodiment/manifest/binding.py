@@ -7,6 +7,7 @@ from enum import Enum
 from pathlib import Path
 from typing import Any, TypeVar
 
+from roboclaw.embodied.embodiment.arm.registry import get_role
 from roboclaw.embodied.embodiment.interface.base import Interface
 from roboclaw.embodied.embodiment.interface.serial import SerialInterface
 from roboclaw.embodied.embodiment.interface.video import VideoInterface
@@ -70,15 +71,7 @@ class ArmBinding(Binding):
 
     @property
     def role(self) -> ArmRole:
-        if self.arm_type.endswith(f"_{ArmRole.FOLLOWER.value}"):
-            return ArmRole.FOLLOWER
-        if self.arm_type.endswith(f"_{ArmRole.LEADER.value}"):
-            return ArmRole.LEADER
-        raise ValueError(f"Arm type '{self.arm_type}' must end with '_follower' or '_leader'.")
-
-    @property
-    def family(self) -> str:
-        return self.arm_type.rsplit("_", 1)[0]
+        return ArmRole(get_role(self.arm_type))
 
     def with_calibrated(self, calibrated: bool = True) -> ArmBinding:
         return replace(self, calibrated=calibrated)

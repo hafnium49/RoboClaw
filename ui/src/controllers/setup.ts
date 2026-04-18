@@ -224,6 +224,32 @@ function deriveWizardStep(
   return 'select'
 }
 
+interface ClearableState {
+  sessionPhase: SetupPhase
+  busy: boolean
+  assignments: Assignment[]
+  scannedPorts: ScannedPort[]
+  scannedCameras: ScannedCamera[]
+}
+
+function isSessionCleared(state: ClearableState): boolean {
+  return (
+    state.sessionPhase === 'idle'
+    && !state.busy
+    && state.assignments.length === 0
+    && state.scannedPorts.length === 0
+    && state.scannedCameras.length === 0
+  )
+}
+
+const CLEARED_WIZARD_STATE = {
+  wizardRequested: false,
+  wizardActive: false,
+  wizardStep: 'select' as WizardStep,
+  selectedCategory: '',
+  selectedModel: '',
+}
+
 function buildScannedPorts(
   candidates: SetupCandidate[],
   currentPorts: ScannedPort[],
@@ -349,21 +375,8 @@ export const useSetup = create<SetupStore>((set, get) => ({
       set({ error: (e as Error).message })
     }
     await get().refreshSession()
-    const state = get()
-    const sessionCleared =
-      state.sessionPhase === 'idle'
-      && !state.busy
-      && state.assignments.length === 0
-      && state.scannedPorts.length === 0
-      && state.scannedCameras.length === 0
-    if (sessionCleared) {
-      set({
-        wizardRequested: false,
-        wizardActive: false,
-        wizardStep: 'select',
-        selectedCategory: '',
-        selectedModel: '',
-      })
+    if (isSessionCleared(get())) {
+      set(CLEARED_WIZARD_STATE)
     }
   },
 
@@ -385,27 +398,14 @@ export const useSetup = create<SetupStore>((set, get) => ({
     })
     try {
       const data = await postJson(`${SETUP}/scan`, { model })
-      const ports: ScannedPort[] = (data.ports || []).map((p: any) => ({
-        stable_id: p.stable_id || p.by_id || p.dev || '',
-        label: p.label || p.dev || '?',
-        by_id: p.by_id || '',
-        by_path: p.by_path || '',
-        dev: p.dev || '',
-        motor_ids: p.motor_ids || [],
-        delta: 0,
-        moved: false,
+      const portCandidates: SetupCandidate[] = (data.ports || []).map((p: any) => ({
+        ...p, interface_type: 'serial',
       }))
-      const cameras: ScannedCamera[] = (data.cameras || []).map((c: any, i: number) => ({
-        stable_id: c.stable_id || c.by_path || c.by_id || c.dev || '',
-        label: c.label || c.dev || '?',
-        index: i,
-        by_path: c.by_path || '',
-        by_id: c.by_id || '',
-        dev: c.dev || '',
-        width: c.width || 640,
-        height: c.height || 480,
-        preview_url: null,
+      const cameraCandidates: SetupCandidate[] = (data.cameras || []).map((c: any) => ({
+        ...c, interface_type: 'video',
       }))
+      const ports = buildScannedPorts(portCandidates, [])
+      const cameras = buildScannedCameras(cameraCandidates, [])
       set({ scannedPorts: ports, scannedCameras: cameras, error: null })
       if (cameras.length > 0) {
         await get().doCapturePreview()
@@ -531,21 +531,8 @@ export const useSetup = create<SetupStore>((set, get) => ({
       set({ error: (e as Error).message })
     }
     await get().refreshSession()
-    const state = get()
-    const sessionCleared =
-      state.sessionPhase === 'idle'
-      && !state.busy
-      && state.assignments.length === 0
-      && state.scannedPorts.length === 0
-      && state.scannedCameras.length === 0
-    if (sessionCleared) {
-      set({
-        wizardRequested: false,
-        wizardActive: false,
-        wizardStep: 'select',
-        selectedCategory: '',
-        selectedModel: '',
-      })
+    if (isSessionCleared(get())) {
+      set(CLEARED_WIZARD_STATE)
     }
   },
 

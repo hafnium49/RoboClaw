@@ -55,7 +55,6 @@ def test_load_binding_returns_typed_objects() -> None:
 
     assert isinstance(arm, ArmBinding)
     assert arm.role is ArmRole.FOLLOWER
-    assert arm.family == "so101"
     assert arm.to_dict()["type"] == "so101_follower"
     assert not hasattr(arm, "is_follower")
     assert not hasattr(arm, "kind")

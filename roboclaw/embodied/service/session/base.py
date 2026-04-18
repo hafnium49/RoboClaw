@@ -42,7 +42,7 @@ class Session:
         self._wait_task: asyncio.Task | None = None
         self._runner = SubprocessExecutor()
         self._stopped = False
-        self._exit_callback: Callable[[], Any] | None = None
+        self._exit_callback: Callable[["Session"], Any] | None = None
 
     # -- Subclass hooks ----------------------------------------------------
 
@@ -184,7 +184,7 @@ class Session:
                 await self.board.update(state=SessionState.ERROR, error=self._format_exit_error(rc))
             # Release embodiment lock — subprocess is dead, hardware is free
             if self._exit_callback:
-                self._exit_callback()
+                self._exit_callback(self)
 
     def _format_exit_error(self, rc: int) -> str:
         """Extract error info from Board logs after a non-zero exit."""

@@ -10,7 +10,6 @@ import asyncio
 import time
 from dataclasses import asdict, dataclass
 from enum import Enum
-from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
@@ -79,21 +78,22 @@ class CameraStatus:
 
 def check_arm_status(arm: ArmBinding) -> ArmStatus:
     """Check a single arm's connectivity and calibration state."""
-    alias = arm.alias
-    connected = bool(arm.port and Path(arm.port).exists())
-    calibrated = arm.calibrated
-    arm_type = arm.arm_type
-    role = arm.role.value
-    return ArmStatus(alias=alias, arm_type=arm_type, role=role, connected=connected, calibrated=calibrated)
+    return ArmStatus(
+        alias=arm.alias,
+        arm_type=arm.arm_type,
+        role=arm.role.value,
+        connected=arm.connected,
+        calibrated=arm.calibrated,
+    )
 
 
 def check_camera_status(cam: CameraBinding) -> CameraStatus:
     """Check a single camera's connectivity."""
-    alias = cam.alias
-    connected = bool(cam.port and Path(cam.port).exists())
     return CameraStatus(
-        alias=alias, connected=connected,
-        width=cam.interface.width, height=cam.interface.height,
+        alias=cam.alias,
+        connected=cam.connected,
+        width=cam.interface.width,
+        height=cam.interface.height,
     )
 
 

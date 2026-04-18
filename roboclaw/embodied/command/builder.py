@@ -16,6 +16,7 @@ from roboclaw.embodied.command.helpers import (
     resolve_cameras,
     validate_dataset_name,
 )
+from roboclaw.embodied.embodiment.arm.registry import get_model
 from roboclaw.embodied.embodiment.manifest.binding import ArmBinding, ArmRole, CameraBinding
 
 _BIMANUAL: dict[str, tuple[str, str]] = {
@@ -187,7 +188,7 @@ def _robot_argv(
         if cameras:
             args.extend(_camera_args(resolve_cameras(cameras)))
     else:
-        family = followers[0].family
+        family = get_model(followers[0].arm_type)
         bi_follower, bi_leader = _BIMANUAL[family]
         args.extend(_bimanual_args("robot", followers[0], followers[1], bi_follower, cameras))
         if leaders:
