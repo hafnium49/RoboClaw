@@ -103,17 +103,18 @@ def calibration_root(tmp_path: Path) -> Path:
     with (
         std_patch("roboclaw.embodied.embodiment.manifest.helpers.get_calibration_root", return_value=root),
         std_patch("roboclaw.embodied.embodiment.manifest.state.get_calibration_root", return_value=root),
+        std_patch("roboclaw.embodied.embodiment.lock.get_roboclaw_home", return_value=tmp_path),
     ):
         yield root
 
 
 def test_create_embodied_tools_returns_eight_groups() -> None:
     tools = create_embodied_tools()
-    assert len(tools) == 8
+    assert len(tools) == 9
     names = {t.name for t in tools}
     assert names == {
         "setup", "doctor", "calibration", "teleop",
-        "record", "replay", "train", "infer",
+        "record", "replay", "train", "infer", "hub",
     }
 
 
@@ -224,18 +225,20 @@ async def test_record_action(tmp_path: Path) -> None:
 @pytest.mark.asyncio
 async def test_replay_action(tmp_path: Path) -> None:
     tool = _find_tool(create_embodied_tools(tty_handoff=AsyncMock()), "replay")
-    mock_runner = AsyncMock()
-    mock_runner.run_interactive.return_value = (0, "")
     manifest = _manifest_from_data(tmp_path, _MOCK_SETUP)
     from roboclaw.embodied.service import EmbodiedService
     tool.embodied_service = EmbodiedService(manifest=manifest)
+    tool.embodied_service.replay.start = AsyncMock()
 
-    with patch("roboclaw.embodied.executor.SubprocessExecutor", return_value=mock_runner):
+    async def fake_tty_run(self, session):
+        return "Replay finished."
+
+    with patch("roboclaw.embodied.toolkit.tty.TtySession.run", fake_tty_run):
         result = await tool.execute(action="replay", dataset_name="test", episode=2)
 
     assert result == "Replay finished."
-    argv = mock_runner.run_interactive.call_args.args[0]
-    assert argv[:4] == [sys.executable, "-m", "roboclaw.embodied.lerobot_wrapper", "replay"]
+    argv = tool.embodied_service.replay.start.await_args.args[0]
+    assert argv[:4] == [sys.executable, "-m", "roboclaw.embodied.command.wrapper", "replay"]
     assert "--dataset.episode=2" in argv
 
 
@@ -257,16 +260,15 @@ async def test_train_action(tmp_path: Path) -> None:
 @pytest.mark.asyncio
 async def test_infer_action(tmp_path: Path) -> None:
     tool = _find_tool(create_embodied_tools(), "infer")
-    mock_runner = AsyncMock()
-    mock_runner.run = AsyncMock(return_value=(0, "ok", ""))
     manifest = _manifest_from_data(tmp_path, _MOCK_SETUP)
     from roboclaw.embodied.service import EmbodiedService
     tool.embodied_service = EmbodiedService(manifest=manifest)
+    tool.embodied_service.infer.start = AsyncMock()
 
-    with patch("roboclaw.embodied.executor.SubprocessExecutor", return_value=mock_runner):
-        await tool.execute(action="run_policy", checkpoint_path="/models/act")
+    result = await tool.execute(action="run_policy", checkpoint_path="/models/act")
 
-    argv = mock_runner.run.call_args[0][0]
+    assert result == "Inference started."
+    argv = tool.embodied_service.infer.start.await_args.args[0]
     assert "--policy.path=/models/act" in argv
 
 
@@ -561,13 +563,13 @@ def test_resolve_arms_auto(tmp_path: Path) -> None:
 
 
 def test_resolve_arms_missing(tmp_path: Path) -> None:
-    with pytest.raises(ValueError, match="No arm with port 'missing'"):
+    with pytest.raises(ActionError, match="No arm with alias or port 'missing'"):
         _resolve_arms(_manifest_from_data(tmp_path, _MOCK_SETUP), "missing")
 
 
-def test_resolve_arms_rejects_alias_lookup(tmp_path: Path) -> None:
-    with pytest.raises(ValueError, match="No arm with port 'right_follower'"):
-        _resolve_arms(_manifest_from_data(tmp_path, _MOCK_SETUP), "right_follower")
+def test_resolve_arms_accepts_alias_lookup(tmp_path: Path) -> None:
+    result = _resolve_arms(_manifest_from_data(tmp_path, _MOCK_SETUP), "right_follower")
+    assert [arm.alias for arm in result] == ["right_follower"]
 
 
 def test_group_arms(tmp_path: Path) -> None:

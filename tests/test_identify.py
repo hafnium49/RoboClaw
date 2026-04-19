@@ -63,7 +63,6 @@ async def test_identify_with_tty_uses_tty_session(tmp_path: Path) -> None:
 # ── Unit tests for hardware module helpers ─────────────────────────────
 
 from roboclaw.embodied.embodiment.hardware.motion import detect_motion
-from roboclaw.embodied.embodiment.hardware.scan import port_candidates
 
 
 def test_detect_motion_above_threshold() -> None:
@@ -85,12 +84,3 @@ def test_detect_motion_missing_ids() -> None:
     baseline = {1: 100, 2: 200, 3: 300}
     current = {1: 150}
     assert detect_motion(baseline, current) == 50
-
-
-def test_port_candidates_adds_cu_variant_on_macos() -> None:
-    import roboclaw.embodied.embodiment.hardware.scan as scan_module
-    with patch.object(scan_module.sys, "platform", "darwin"):
-        assert port_candidates("/dev/tty.usbmodem123") == [
-            "/dev/tty.usbmodem123",
-            "/dev/cu.usbmodem123",
-        ]

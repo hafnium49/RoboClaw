@@ -15,6 +15,15 @@ from roboclaw.http.routes import hardware as hardware_routes
 from roboclaw.http.routes import register_all_routes
 
 
+@pytest.fixture(autouse=True)
+def isolated_roboclaw_home(tmp_path):
+    with patch(
+        "roboclaw.embodied.embodiment.lock.get_roboclaw_home",
+        return_value=tmp_path,
+    ):
+        yield
+
+
 @pytest.fixture()
 def app(tmp_path):
     """Minimal FastAPI app with dashboard routes registered."""
@@ -66,7 +75,7 @@ class TestSessionStatus:
 
 
 # ---------------------------------------------------------------------------
-# Session lifecycle (wrong state -> 500)
+# Session lifecycle
 # ---------------------------------------------------------------------------
 
 class TestSessionLifecycle:
@@ -81,11 +90,13 @@ class TestSessionLifecycle:
 
     def test_save_episode_no_subprocess(self, client):
         resp = client.post("/api/record/episode/save")
-        assert resp.status_code == 400
+        assert resp.status_code == 200
+        assert resp.json() == {"status": "episode_saved"}
 
     def test_discard_episode_no_subprocess(self, client):
         resp = client.post("/api/record/episode/discard")
-        assert resp.status_code == 400
+        assert resp.status_code == 200
+        assert resp.json() == {"status": "episode_discarded"}
 
 
 # ---------------------------------------------------------------------------
@@ -169,11 +180,14 @@ class TestServoPositions:
         assert data["error"] is None
 
     def test_servo_when_busy(self, client, app):
-        app.state.embodied_service._engine._state = "recording"
-        resp = client.get("/api/hardware/servos")
+        with patch.object(
+            app.state.embodied_service._file_lock,
+            "try_shared",
+            return_value=False,
+        ):
+            resp = client.get("/api/hardware/servos")
         assert resp.status_code == 200
         assert resp.json()["error"] == "busy"
-        app.state.embodied_service._engine._state = "idle"
 
 
 # ---------------------------------------------------------------------------

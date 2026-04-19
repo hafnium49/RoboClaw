@@ -73,7 +73,7 @@ class TestListDatasets:
         _create_dataset(local, "nested_ds")
         result = list_datasets(tmp_path)
         assert len(result) == 1
-        assert result[0]["name"] == "nested_ds"
+        assert result[0]["name"] == "local/nested_ds"
 
     def test_ignores_dirs_without_info_json(self, tmp_path):
         (tmp_path / "not_a_dataset").mkdir()

@@ -191,7 +191,7 @@ async def test_list_datasets_with_entries(tmp_path: Path) -> None:
 
 
 @pytest.mark.asyncio
-async def test_list_datasets_skips_corrupt_json(tmp_path: Path) -> None:
+async def test_list_datasets_raises_on_corrupt_json(tmp_path: Path) -> None:
     ds_dir = tmp_path / "local" / "bad" / "meta"
     ds_dir.mkdir(parents=True)
     (ds_dir / "info.json").write_text("{corrupt")
@@ -201,9 +201,8 @@ async def test_list_datasets_skips_corrupt_json(tmp_path: Path) -> None:
     from roboclaw.embodied.service import EmbodiedService
     tool.embodied_service = EmbodiedService(manifest=manifest)
 
-    result = await tool.execute(action="list_datasets")
-
-    assert result == "No datasets found."
+    with pytest.raises(json.JSONDecodeError):
+        await tool.execute(action="list_datasets")
 
 
 @pytest.mark.asyncio
@@ -242,7 +241,7 @@ async def test_list_policies_with_entries(tmp_path: Path) -> None:
 
 
 @pytest.mark.asyncio
-async def test_list_policies_skips_corrupt_config(tmp_path: Path) -> None:
+async def test_list_policies_raises_on_corrupt_config(tmp_path: Path) -> None:
     p = tmp_path / "bad_pol" / "checkpoints" / "last" / "pretrained_model"
     p.mkdir(parents=True)
     (p / "train_config.json").write_text("not json")
@@ -252,10 +251,5 @@ async def test_list_policies_skips_corrupt_config(tmp_path: Path) -> None:
     from roboclaw.embodied.service import EmbodiedService
     tool.embodied_service = EmbodiedService(manifest=manifest)
 
-    result = await tool.execute(action="list_policies")
-
-    policies = json.loads(result)
-    assert len(policies) == 1
-    assert policies[0]["name"] == "bad_pol"
-    assert policies[0]["dataset"] == ""
-    assert policies[0]["steps"] == 0
+    with pytest.raises(json.JSONDecodeError):
+        await tool.execute(action="list_policies")

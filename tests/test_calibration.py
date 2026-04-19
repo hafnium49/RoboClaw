@@ -1,180 +1,191 @@
-"""Tests for CalibrationSession."""
+"""Tests for the current CalibrationSession flow."""
+
+from __future__ import annotations
 
 import json
+import sys
 from pathlib import Path
-from unittest.mock import MagicMock, patch
+from types import SimpleNamespace
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from roboclaw.embodied.service.session.calibrate import CalibrationEngine as CalibrationSession
-# SO101 constant was deleted; tests need rewrite for new spec dict approach
+from roboclaw.embodied.board import Board, SessionState
+from roboclaw.embodied.command.builder import CommandBuilder
+from roboclaw.embodied.embodiment.manifest import Manifest
 from roboclaw.embodied.embodiment.manifest.binding import Binding
+from roboclaw.embodied.embodiment.manifest.helpers import save_manifest
+from roboclaw.embodied.service import EmbodiedService
+from roboclaw.embodied.service.session.calibrate import (
+    CalibrationOutputConsumer,
+    _resolve_targets,
+    _sync_calibration_to_motors,
+)
+
+
+def _manifest_from_data(tmp_path: Path, data: dict) -> Manifest:
+    path = tmp_path / "manifest.json"
+    save_manifest(data, path)
+    return Manifest(path=path)
 
 
 @pytest.fixture
-def arm_config(tmp_path: Path) -> Binding:
-    cal_dir = tmp_path / "calibration" / "TEST_SERIAL"
+def manifest_data(tmp_path: Path) -> Manifest:
+    serial_a = "F001"
+    serial_b = "L001"
+    return _manifest_from_data(
+        tmp_path,
+        {
+            "version": 2,
+            "arms": [
+                {
+                    "alias": "follower_a",
+                    "type": "so101_follower",
+                    "port": f"/dev/serial/by-id/{serial_a}",
+                    "calibration_dir": str(tmp_path / "calibration" / serial_a),
+                    "calibrated": False,
+                },
+                {
+                    "alias": "leader_b",
+                    "type": "so101_leader",
+                    "port": f"/dev/serial/by-id/{serial_b}",
+                    "calibration_dir": str(tmp_path / "calibration" / serial_b),
+                    "calibrated": True,
+                },
+            ],
+            "hands": [],
+            "cameras": [],
+            "datasets": {"root": "/data"},
+            "policies": {"root": "/policies"},
+        },
+    )
+
+
+def test_output_consumer_parses_position_rows_and_steps() -> None:
+    board = Board()
+    consumer = CalibrationOutputConsumer(board, stdout=None)
+
+    async def _run() -> None:
+        await consumer.parse_line("shoulder_pan | -100 | 0 | 100")
+        await consumer.parse_line("Press Enter to use provided calibration")
+        await consumer.parse_line("Move joint to middle and press Enter")
+        await consumer.parse_line("Recording positions. Press Enter to stop")
+        await consumer.parse_line("Calibration saved")
+
+    import asyncio
+
+    asyncio.run(_run())
+
+    state = board.state
+    assert state["calibration_positions"] == {
+        "shoulder_pan": {"min": -100, "pos": 0, "max": 100}
+    }
+    assert state["calibration_step"] == "done"
+
+
+@pytest.mark.asyncio
+async def test_start_calibration_uses_current_command_builder(
+    manifest_data: Manifest,
+) -> None:
+    service = EmbodiedService(manifest=manifest_data)
+    session = service.calibration
+    arm = manifest_data.arms[0]
+
+    with patch.object(session, "start", AsyncMock()) as start:
+        await session.start_calibration(arm, manifest_data)
+
+    start.assert_awaited_once_with(
+        CommandBuilder.calibrate(arm),
+        initial_state=SessionState.CALIBRATING,
+        auto_confirm=False,
+    )
+    assert service.board.state["calibration_arm"] == arm.alias
+
+
+def test_status_line_and_result_reflect_current_board_state(
+    manifest_data: Manifest,
+) -> None:
+    service = EmbodiedService(manifest=manifest_data)
+    session = service.calibration
+
+    service.board.set_field("calibration_arm", "follower_a")
+    service.board.set_field("calibration_step", "recording")
+    assert session.status_line() == "Calibrating follower_a: recording range of motion"
+
+    service.board.set_field("calibration_step", "done")
+    assert session.result() == "Calibration of follower_a completed successfully."
+
+    service.board.set_field("state", SessionState.ERROR)
+    service.board.set_field("error", "serial timeout")
+    service.board.set_field("calibration_step", "")
+    assert session.result() == "Calibration of follower_a failed: serial timeout"
+
+
+def test_resolve_targets_skips_calibrated_arms_by_default(
+    manifest_data: Manifest,
+) -> None:
+    targets = _resolve_targets(manifest_data, {})
+    assert [arm.alias for arm in targets] == ["follower_a"]
+
+
+def test_resolve_targets_keeps_explicit_selection_even_if_calibrated(
+    manifest_data: Manifest,
+) -> None:
+    targets = _resolve_targets(manifest_data, {"arms": "leader_b"})
+    assert [arm.alias for arm in targets] == ["leader_b"]
+
+
+def test_sync_calibration_to_motors_writes_expected_registers(tmp_path: Path) -> None:
+    serial = "SYNC001"
+    cal_dir = tmp_path / "calibration" / serial
     cal_dir.mkdir(parents=True)
-    return Binding.from_dict({
-        "alias": "test_follower",
-        "type": "so101_follower",
-        "port": "/dev/ttyACM0",
-        "calibration_dir": str(cal_dir),
-        "calibrated": False,
-    }, "arm", {})
+    cal_path = cal_dir / f"{serial}.json"
+    cal_path.write_text(
+        json.dumps(
+            {
+                "shoulder_pan": {
+                    "id": 1,
+                    "drive_mode": 0,
+                    "homing_offset": 10,
+                    "range_min": -20,
+                    "range_max": 30,
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+    arm = Binding.from_dict(
+        {
+            "alias": "follower_sync",
+            "type": "so101_follower",
+            "port": "/dev/ttyACM0",
+            "calibration_dir": str(cal_dir),
+            "calibrated": True,
+        },
+        "arm",
+        {},
+    )
+    fake_bus = MagicMock()
+    fake_module = SimpleNamespace(FeetechMotorsBus=lambda **kwargs: fake_bus)
+    fake_motor_module = SimpleNamespace(
+        Motor=lambda **kwargs: SimpleNamespace(**kwargs),
+        MotorCalibration=lambda **kwargs: SimpleNamespace(**kwargs),
+        MotorNormMode=SimpleNamespace(DEGREES="degrees"),
+    )
 
+    with (
+        patch.dict(sys.modules, {"lerobot.motors.motors_bus": fake_motor_module}),
+        patch(
+            "roboclaw.embodied.service.session.calibrate.importlib.import_module",
+            return_value=fake_module,
+        ),
+    ):
+        _sync_calibration_to_motors(arm)
 
-@pytest.fixture
-def mock_bus():
-    """Create a mock motor bus with realistic behavior."""
-    bus = MagicMock()
-    bus.motors = {
-        "shoulder_pan": MagicMock(id=1),
-        "shoulder_lift": MagicMock(id=2),
-        "elbow_flex": MagicMock(id=3),
-        "wrist_flex": MagicMock(id=4),
-        "wrist_roll": MagicMock(id=5),
-        "gripper": MagicMock(id=6),
-    }
-    bus.set_half_turn_homings.return_value = {
-        "shoulder_pan": -100,
-        "shoulder_lift": -200,
-        "elbow_flex": 300,
-        "wrist_flex": -400,
-        "wrist_roll": 500,
-        "gripper": 600,
-    }
-    # sync_read returns positions — vary between calls for min/max coverage
-    call_count = [0]
-    def _varying_sync_read(*args, **kwargs):
-        call_count[0] += 1
-        if call_count[0] <= 1:
-            return {"shoulder_pan": 2000, "shoulder_lift": 2100, "elbow_flex": 2200, "wrist_flex": 2300, "gripper": 2400}
-        return {"shoulder_pan": 1800, "shoulder_lift": 2500, "elbow_flex": 1900, "wrist_flex": 2700, "gripper": 2600}
-    bus.sync_read.side_effect = _varying_sync_read
-    return bus
-
-
-def test_session_initial_state(arm_config: Binding) -> None:
-    session = CalibrationSession(arm_config)
-    assert session.state == "idle"
-    assert session.spec == SO101
-
-
-def test_session_state_transitions(arm_config: Binding, mock_bus: MagicMock) -> None:
-    session = CalibrationSession(arm_config)
-
-    with patch.object(session, "_import_bus_class", return_value=lambda **kw: mock_bus), \
-         patch.object(session, "_import_motor_types") as mock_mt, \
-         patch.object(session, "_import_operating_mode") as mock_om, \
-         patch.object(session, "_import_motor_calibration") as mock_mc:
-
-        # Mock Motor and MotorNormMode
-        MockMotor = MagicMock()
-        MockNormMode = MagicMock()
-        MockNormMode.RANGE_M100_100 = "range_m100_100"
-        mock_mt.return_value = (MockMotor, MockNormMode)
-
-        MockOperatingMode = MagicMock()
-        MockOperatingMode.POSITION.value = 3
-        mock_om.return_value = MockOperatingMode
-
-        from types import SimpleNamespace
-        mock_mc.return_value = lambda **kw: SimpleNamespace(**kw)
-
-        # Connect
-        session.connect()
-        assert session.state == "connected"
-        mock_bus.connect.assert_called_once()
-        mock_bus.disable_torque.assert_called_once()
-
-        # Set homing
-        offsets = session.set_homing()
-        assert session.state == "recording"
-        assert offsets["shoulder_pan"] == -100
-        mock_bus.set_half_turn_homings.assert_called_once()
-
-        # Read range positions
-        snapshot = session.read_range_positions()
-        assert "shoulder_pan" in snapshot.positions
-        assert "shoulder_pan" in snapshot.mins
-
-        # Finish
-        session.finish()
-        assert session.state == "done"
-        mock_bus.write_calibration.assert_called_once()
-
-
-def test_session_saves_calibration_json(arm_config: Binding, mock_bus: MagicMock) -> None:
-    session = CalibrationSession(arm_config)
-
-    with patch.object(session, "_import_bus_class", return_value=lambda **kw: mock_bus), \
-         patch.object(session, "_import_motor_types") as mock_mt, \
-         patch.object(session, "_import_operating_mode") as mock_om, \
-         patch.object(session, "_import_motor_calibration") as mock_mc:
-
-        MockMotor = MagicMock()
-        MockNormMode = MagicMock()
-        MockNormMode.RANGE_M100_100 = "range_m100_100"
-        mock_mt.return_value = (MockMotor, MockNormMode)
-        mock_om.return_value = MagicMock(POSITION=MagicMock(value=3))
-
-        # Make MotorCalibration a simple namespace
-        from types import SimpleNamespace
-        mock_mc.return_value = lambda **kw: SimpleNamespace(**kw)
-
-        # Make sync_read return different values on successive calls to test min/max
-        positions_call_count = [0]
-        def varying_positions(*args, **kwargs):
-            positions_call_count[0] += 1
-            if positions_call_count[0] == 1:
-                # Initial read
-                return {"shoulder_pan": 2000, "shoulder_lift": 2100, "elbow_flex": 2200, "wrist_flex": 2300, "gripper": 2400}
-            # Moved positions
-            return {"shoulder_pan": 1800, "shoulder_lift": 2500, "elbow_flex": 1900, "wrist_flex": 2700, "gripper": 2600}
-
-        mock_bus.sync_read.side_effect = varying_positions
-
-        session.connect()
-        session.set_homing()
-        session.read_range_positions()  # records min/max
-        cal = session.finish()
-
-        # Check calibration file was written
-        cal_dir = Path(arm_config.calibration_dir)
-        cal_file = cal_dir / f"{cal_dir.name}.json"
-        assert cal_file.exists()
-        saved = json.loads(cal_file.read_text())
-        assert "shoulder_pan" in saved
-        assert saved["shoulder_pan"]["homing_offset"] == -100
-
-
-def test_cancel_resets_state(arm_config: Binding, mock_bus: MagicMock) -> None:
-    session = CalibrationSession(arm_config)
-
-    with patch.object(session, "_import_bus_class", return_value=lambda **kw: mock_bus), \
-         patch.object(session, "_import_motor_types") as mock_mt, \
-         patch.object(session, "_import_operating_mode") as mock_om:
-
-        MockMotor = MagicMock()
-        MockNormMode = MagicMock()
-        MockNormMode.RANGE_M100_100 = "range_m100_100"
-        mock_mt.return_value = (MockMotor, MockNormMode)
-        mock_om.return_value = MagicMock(POSITION=MagicMock(value=3))
-
-        session.connect()
-        assert session.state == "connected"
-
-        session.cancel()
-        assert session.state == "idle"
-        mock_bus.disconnect.assert_called()
-
-
-def test_wrong_state_raises(arm_config: Binding) -> None:
-    session = CalibrationSession(arm_config)
-    with pytest.raises(RuntimeError, match="Cannot set homing"):
-        session.set_homing()
-    with pytest.raises(RuntimeError, match="Cannot read range"):
-        session.read_range_positions()
-    with pytest.raises(RuntimeError, match="Cannot finish"):
-        session.finish()
+    fake_bus.connect.assert_called_once_with()
+    assert fake_bus.write.call_args_list == [
+        (("Homing_Offset", "shoulder_pan", 10), {"normalize": False}),
+        (("Min_Position_Limit", "shoulder_pan", -20), {"normalize": False}),
+        (("Max_Position_Limit", "shoulder_pan", 30), {"normalize": False}),
+    ]
+    fake_bus.disconnect.assert_called_once_with()
