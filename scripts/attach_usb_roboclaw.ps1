@@ -51,7 +51,10 @@ Write-Host "=== Attaching USB devices to $Distro ==="
 Write-Host "  Target BUSIDs: $($BusIds -join ', ')"
 Write-Host ""
 
-# Detach first so we never collide with a prior attachment (e.g. to Ubuntu).
+# Clear any stale sessions (e.g. left over from a usbipd service restart after Windows Update).
+# Then detach each target BUSID so we never collide with a prior attachment (e.g. to Ubuntu).
+Write-Host "  Clearing stale usbipd sessions..."
+usbipd detach --all 2>$null | Out-Null
 foreach ($b in $BusIds) { usbipd detach --busid $b 2>$null | Out-Null }
 
 foreach ($b in $BusIds) {

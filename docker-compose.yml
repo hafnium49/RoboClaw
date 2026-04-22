@@ -27,10 +27,10 @@ services:
       - /dev/ttyACM3
       - /dev/video0
     device_cgroup_rules:
-      - 'c 81:* rmw'
-      - 'c 166:* rmw'
-      - 'c 188:* rmw'
-      - 'c 189:* rmw'
+      - 'c 81:* rmw'     # video4linux
+      - 'c 166:* rmw'    # ttyACM (CDC-ACM, CH343 default enumeration)
+      - 'c 188:* rmw'    # ttyUSB (CH343 alt-mode fallback)
+      - 'c 189:* rmw'    # usb_device — grants raw libusb access; the container can reprogram CH343 firmware. Trusted-host-only.
     restart: unless-stopped
     stdin_open: true
     tty: true
