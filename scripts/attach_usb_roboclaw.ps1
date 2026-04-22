@@ -13,7 +13,7 @@ param(
 
 $ErrorActionPreference = "Stop"
 
-function Require-Admin {
+function Assert-Admin {
     $principal = New-Object Security.Principal.WindowsPrincipal(
         [Security.Principal.WindowsIdentity]::GetCurrent())
     if (-not $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) {
@@ -21,22 +21,22 @@ function Require-Admin {
     }
 }
 
-function Require-Command($name) {
+function Assert-CommandOnPath($name) {
     if (-not (Get-Command $name -ErrorAction SilentlyContinue)) {
         throw "Required command '$name' not found on PATH."
     }
 }
 
-function Distro-Exists($name) {
+function Test-Distro($name) {
     $distros = wsl --list --quiet 2>$null
     return ($distros -split "`r?`n" | ForEach-Object { $_.Trim() }) -contains $name
 }
 
-Require-Admin
-Require-Command usbipd
-Require-Command wsl
+Assert-Admin
+Assert-CommandOnPath usbipd
+Assert-CommandOnPath wsl
 
-if (-not (Distro-Exists $Distro)) {
+if (-not (Test-Distro $Distro)) {
     throw "WSL distro '$Distro' not found. Create it first (see deployment plan step 1)."
 }
 

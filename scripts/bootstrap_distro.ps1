@@ -29,7 +29,7 @@ param(
 
 $ErrorActionPreference = "Stop"
 
-function Require-Admin {
+function Assert-Admin {
     $principal = New-Object Security.Principal.WindowsPrincipal(
         [Security.Principal.WindowsIdentity]::GetCurrent())
     if (-not $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) {
@@ -37,21 +37,21 @@ function Require-Admin {
     }
 }
 
-function Require-Command($name) {
+function Assert-CommandOnPath($name) {
     if (-not (Get-Command $name -ErrorAction SilentlyContinue)) {
         throw "Required command '$name' not found on PATH."
     }
 }
 
-function Distro-Exists($name) {
+function Test-Distro($name) {
     $lines = wsl --list --quiet 2>$null
     $names = @()
     foreach ($l in ($lines -split "`r?`n")) { if ($l) { $names += $l.Trim() } }
     return $names -contains $name
 }
 
-Require-Admin
-Require-Command wsl
+Assert-Admin
+Assert-CommandOnPath wsl
 
 # ------------------------------------------------------------------------
 # 1. Rootfs download (cached)
@@ -76,7 +76,7 @@ if (Test-Path $rootfs) {
 # ------------------------------------------------------------------------
 # 2. Import WSL distro (idempotent)
 # ------------------------------------------------------------------------
-if (Distro-Exists $Distro) {
+if (Test-Distro $Distro) {
     Write-Host "[2/4] WSL distro '$Distro' already exists; skipping import" -ForegroundColor DarkGray
 } else {
     Write-Host "[2/4] Importing rootfs as WSL distro '$Distro'..."
