@@ -1,40 +1,48 @@
+# syntax=docker/dockerfile:1.6
+
+# --- Stage 1: UI builder ---
+FROM node:20-slim AS ui-builder
+WORKDIR /app/ui
+COPY ui/package*.json ./
+RUN npm ci
+COPY ui/ ./
+RUN npm run build
+
+# --- Stage 2: WhatsApp bridge builder ---
+FROM node:20-slim AS bridge-builder
+WORKDIR /app/bridge
+COPY bridge/package*.json ./
+RUN npm ci
+COPY bridge/ ./
+RUN npm run build
+
+# --- Stage 3: Python runtime ---
 FROM ghcr.io/astral-sh/uv:python3.12-bookworm-slim
 
-# Install Node.js 20 for the WhatsApp bridge
-RUN apt-get update && \
-    apt-get install -y --no-install-recommends curl ca-certificates gnupg git && \
-    mkdir -p /etc/apt/keyrings && \
-    curl -fsSL https://deb.nodesource.com/gpgkey/nodesource-repo.gpg.key | gpg --dearmor -o /etc/apt/keyrings/nodesource.gpg && \
-    echo "deb [signed-by=/etc/apt/keyrings/nodesource.gpg] https://deb.nodesource.com/node_20.x nodistro main" > /etc/apt/sources.list.d/nodesource.list && \
-    apt-get update && \
-    apt-get install -y --no-install-recommends nodejs && \
-    apt-get purge -y gnupg && \
-    apt-get autoremove -y && \
-    rm -rf /var/lib/apt/lists/*
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends \
+      curl ca-certificates git nodejs \
+ && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
 
-# Install Python dependencies first (cached layer)
-COPY pyproject.toml README.md LICENSE ./
-RUN mkdir -p roboclaw bridge && touch roboclaw/__init__.py && \
-    uv pip install --system --no-cache . && \
-    rm -rf roboclaw bridge
-
-# Copy the full source and install
+# Install Python deps (layer-cached on pyproject/uv.lock)
+COPY pyproject.toml uv.lock README.md LICENSE ./
 COPY roboclaw/ roboclaw/
-COPY bridge/ bridge/
-RUN uv pip install --system --no-cache .
+RUN uv pip install --system --no-cache -e .
 
-# Build the WhatsApp bridge
-WORKDIR /app/bridge
-RUN npm install && npm run build
-WORKDIR /app
+# Built artifacts from earlier stages
+COPY --from=ui-builder     /app/ui/dist              /app/ui/dist
+COPY --from=bridge-builder /app/bridge/dist          /app/bridge/dist
+COPY --from=bridge-builder /app/bridge/node_modules  /app/bridge/node_modules
+COPY bridge/package.json   /app/bridge/package.json
 
-# Create config directory
-RUN mkdir -p /root/.roboclaw
+RUN mkdir -p /root/.roboclaw /root/.cache/huggingface
 
-# Gateway default port
-EXPOSE 18790
+EXPOSE 8765 18790 1455
+
+HEALTHCHECK --interval=30s --timeout=5s --retries=3 \
+  CMD curl -fsS http://localhost:8765/api/health || exit 1
 
 ENTRYPOINT ["roboclaw"]
 CMD ["status"]
