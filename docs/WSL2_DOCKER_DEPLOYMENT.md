@@ -325,6 +325,9 @@ deployment mode.
 | Camera fails to enumerate at >720p | UVC isochronous endpoints over usbipd | Force MJPEG at 720p30; the scanner already sets `CAP_PROP_FOURCC=MJPG` in `roboclaw/embodied/embodiment/hardware/scan.py:503`. Using more than one UVC camera through usbipd is unreliable. |
 | Browser-driven calibration hangs | No PTY in the detached container | Calibrate via `docker compose exec -it roboclaw-web roboclaw agent`. |
 | `docker compose up` complains about cgroup rule 188/189 | Older kernel without those majors | Harmless in practice; remove the two lines if your runtime refuses them. The plan keeps them as defensive entries for CH343 fallback modes. |
+| `wsl.exe`/`pwsh.exe` from the Ubuntu shell fails with `Exec format error` | Known WSL2 bug: cross-distro `wsl -d Ubuntu-roboclaw ...` exit cleanup unregisters the kernel-shared `WSLInterop` binfmt entry | `install-interop-guard.sh` is enabled by §3 inside `Ubuntu-roboclaw` and restores the entry within ~30s. For the operator's `Ubuntu` distro, run the guard installer once: `wsl -d Ubuntu -u root -- bash /mnt/c/Users/<you>/wsl/ubuntu-roboclaw/bootstrap/install-interop-guard.sh`. Check with `systemctl is-active wsl-interop-guard.timer`. |
+| `uv pip install` dies on `evdev==1.9.3` with missing `linux/input.h` | Runtime base image lacks kernel headers | Committed fix in `f4a7591`: stage-2 installs `linux-libc-dev`. If you see this, you're on a stale build — rebuild. |
+| `roboclaw agent` ImportErrors on `torchcodec` / `av` | Runtime missing ffmpeg shared libs | Committed fix in `f4a7591`: stage-2 installs `ffmpeg libavcodec59 libavformat59 libavutil57 libswresample4 libswscale6`. If you see this, rebuild. |
 
 ---
 
