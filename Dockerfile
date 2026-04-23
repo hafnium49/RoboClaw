@@ -2,6 +2,9 @@
 
 # --- Stage 1: UI builder ---
 FROM node:20-slim AS ui-builder
+# git is required because some npm deps resolve via git (e.g. Baileys optional deps).
+RUN apt-get update && apt-get install -y --no-install-recommends git ca-certificates \
+ && rm -rf /var/lib/apt/lists/*
 WORKDIR /app/ui
 COPY ui/package*.json ./
 RUN npm install --no-audit --no-fund --loglevel=error
@@ -10,6 +13,8 @@ RUN npm run build
 
 # --- Stage 2: WhatsApp bridge builder ---
 FROM node:20-slim AS bridge-builder
+RUN apt-get update && apt-get install -y --no-install-recommends git ca-certificates \
+ && rm -rf /var/lib/apt/lists/*
 WORKDIR /app/bridge
 COPY bridge/package*.json ./
 RUN npm install --no-audit --no-fund --loglevel=error
