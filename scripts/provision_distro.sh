@@ -67,10 +67,17 @@ apt-get update -qq
 apt-get install -y --no-install-recommends \
     ca-certificates curl git usbutils iproute2 udev
 
-if command -v docker >/dev/null 2>&1; then
+# Detect a real Docker Engine install (daemon + CLI) vs. Docker Desktop's
+# WSL-integration shim (CLI-only). The shim makes `command -v docker` succeed
+# but has no `dockerd`, so we key on the daemon binary.
+if command -v dockerd >/dev/null 2>&1 && [[ -x /usr/bin/docker ]]; then
     log "docker already installed ($(docker --version))"
 else
-    log "installing Docker Engine via get.docker.com"
+    if command -v docker >/dev/null 2>&1; then
+        log "docker CLI present but is a Docker Desktop shim; installing real Docker Engine"
+    else
+        log "installing Docker Engine via get.docker.com"
+    fi
     curl -fsSL https://get.docker.com -o /tmp/get-docker.sh
     sh /tmp/get-docker.sh
     rm -f /tmp/get-docker.sh
