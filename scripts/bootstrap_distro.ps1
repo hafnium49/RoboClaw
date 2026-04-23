@@ -101,11 +101,11 @@ Write-Host "[3/4] Provisioning '$Distro' (user, Docker Engine, udev)..."
 # dependence on where the repo lives on Windows and sidesteps path-quoting
 # issues across the WSL interop boundary.
 $tmpTar = [System.IO.Path]::GetTempFileName() + ".tar"
-tar -cf $tmpTar -C $scriptDir provision_distro.sh setup-udev.sh install-interop-guard.sh
+tar -cf $tmpTar -C $scriptDir provision_distro.sh setup-udev.sh install-interop-guard.sh deploy.sh
 if ($LASTEXITCODE -ne 0) { throw "Failed to tar provisioner scripts" }
 
 Get-Content -Raw -Encoding Byte $tmpTar |
-    wsl -d $Distro -u root -- bash -c "mkdir -p /root/bootstrap && cd /root/bootstrap && tar -xf - && chmod +x provision_distro.sh setup-udev.sh install-interop-guard.sh"
+    wsl -d $Distro -u root -- bash -c "mkdir -p /root/bootstrap && cd /root/bootstrap && tar -xf - && chmod +x provision_distro.sh setup-udev.sh install-interop-guard.sh deploy.sh"
 if ($LASTEXITCODE -ne 0) {
     Remove-Item $tmpTar -Force -ErrorAction SilentlyContinue
     throw "Failed to ship provisioner scripts into '$Distro' (exit $LASTEXITCODE)"
@@ -129,13 +129,19 @@ Write-Host ""
 Write-Host "=== Post-bootstrap verification ==="
 wsl -d $Distro -- bash -lc "echo User: `$(whoami); echo Groups: `$(id -nG); docker --version 2>&1 || echo 'docker: not in PATH for this shell yet'"
 
+# Also stage deploy.sh to the Windows-side cache for operators who prefer to
+# invoke it via /mnt/c/... (still points at the same content).
+$stagedDeploy = Join-Path $WslRoot "bootstrap\deploy.sh"
+New-Item -ItemType Directory -Force -Path (Split-Path $stagedDeploy) | Out-Null
+Copy-Item -Force (Join-Path $scriptDir "deploy.sh") $stagedDeploy
+
 Write-Host ""
 Write-Host "Bootstrap complete." -ForegroundColor Green
 Write-Host "Next steps:"
-Write-Host "  1. .\scripts\attach_usb_roboclaw.ps1                 # attach SO-101 + camera"
-Write-Host "  2. wsl -d $Distro                                    # enter the distro"
-Write-Host "  3. git clone --recurse-submodules <repo> ~/RoboClaw  # if not already cloned"
-Write-Host "  4. cd ~/RoboClaw && docker compose build roboclaw-web"
-Write-Host "  5. docker compose run --rm roboclaw-web onboard"
+Write-Host "  1. .\scripts\attach_usb_roboclaw.ps1                               # attach SO-101 + camera"
+Write-Host "  2. wsl -d $Distro -u root -- bash /root/bootstrap/deploy.sh        # end-to-end bringup"
+Write-Host "     (equivalently: bash $stagedDeploy)"
+Write-Host "  3. docker compose run --rm roboclaw-web provider login openai-codex  # OAuth"
+Write-Host "  4. docker compose up -d roboclaw-web                               # start the service"
 Write-Host "  6. docker compose run --rm roboclaw-web provider login openai-codex"
 Write-Host "  7. docker compose up -d roboclaw-web"

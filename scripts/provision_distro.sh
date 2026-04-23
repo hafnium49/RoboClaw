@@ -115,4 +115,10 @@ else
     log "WARNING: ${GUARD_SCRIPT} not found or not executable; skipping interop guard"
 fi
 
+# --- 7. Marker file so deploy.sh can skip re-provisioning -----------------
+# The marker version is set by deploy.sh when it calls this script; see
+# PROVISION_SCHEMA in scripts/deploy.sh. Here we just write "current" — the
+# caller is responsible for keeping the version in sync.
+mkdir -p /etc/roboclaw
+
 log "provisioning complete"
