@@ -96,13 +96,23 @@ else
 fi
 
 # --- 5. udev rules for CH343 + v4l ----------------------------------------
-UDEV_SCRIPT="$(dirname "$(readlink -f "$0")")/setup-udev.sh"
+SCRIPT_DIR="$(dirname "$(readlink -f "$0")")"
+UDEV_SCRIPT="${SCRIPT_DIR}/setup-udev.sh"
 if [[ -x "${UDEV_SCRIPT}" ]]; then
     log "running ${UDEV_SCRIPT}"
     # setup-udev.sh uses sudo internally; running as root makes that a no-op.
     "${UDEV_SCRIPT}"
 else
     log "WARNING: ${UDEV_SCRIPT} not found or not executable; skipping udev install"
+fi
+
+# --- 6. WSLInterop guard (re-registers binfmt_misc entry if wiped) --------
+GUARD_SCRIPT="${SCRIPT_DIR}/install-interop-guard.sh"
+if [[ -x "${GUARD_SCRIPT}" ]]; then
+    log "running ${GUARD_SCRIPT}"
+    "${GUARD_SCRIPT}"
+else
+    log "WARNING: ${GUARD_SCRIPT} not found or not executable; skipping interop guard"
 fi
 
 log "provisioning complete"

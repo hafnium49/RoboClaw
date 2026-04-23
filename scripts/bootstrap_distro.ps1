@@ -101,11 +101,11 @@ Write-Host "[3/4] Provisioning '$Distro' (user, Docker Engine, udev)..."
 # dependence on where the repo lives on Windows and sidesteps path-quoting
 # issues across the WSL interop boundary.
 $tmpTar = [System.IO.Path]::GetTempFileName() + ".tar"
-tar -cf $tmpTar -C $scriptDir provision_distro.sh setup-udev.sh
+tar -cf $tmpTar -C $scriptDir provision_distro.sh setup-udev.sh install-interop-guard.sh
 if ($LASTEXITCODE -ne 0) { throw "Failed to tar provisioner scripts" }
 
 Get-Content -Raw -Encoding Byte $tmpTar |
-    wsl -d $Distro -u root -- bash -c "mkdir -p /root/bootstrap && cd /root/bootstrap && tar -xf - && chmod +x provision_distro.sh setup-udev.sh"
+    wsl -d $Distro -u root -- bash -c "mkdir -p /root/bootstrap && cd /root/bootstrap && tar -xf - && chmod +x provision_distro.sh setup-udev.sh install-interop-guard.sh"
 if ($LASTEXITCODE -ne 0) {
     Remove-Item $tmpTar -Force -ErrorAction SilentlyContinue
     throw "Failed to ship provisioner scripts into '$Distro' (exit $LASTEXITCODE)"
