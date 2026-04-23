@@ -4,7 +4,7 @@
 FROM node:20-slim AS ui-builder
 WORKDIR /app/ui
 COPY ui/package*.json ./
-RUN npm ci
+RUN npm install --no-audit --no-fund --loglevel=error
 COPY ui/ ./
 RUN npm run build
 
@@ -12,7 +12,7 @@ RUN npm run build
 FROM node:20-slim AS bridge-builder
 WORKDIR /app/bridge
 COPY bridge/package*.json ./
-RUN npm ci
+RUN npm install --no-audit --no-fund --loglevel=error
 COPY bridge/ ./
 RUN npm run build
 
