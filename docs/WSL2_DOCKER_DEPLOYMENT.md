@@ -79,94 +79,55 @@ Full review rationale lives in `/home/hafnium/.claude/plans/let-s-deploy-robocla
 
 ---
 
-## 3. Create the dedicated WSL2 distro
+## 3. Create the dedicated WSL2 distro + install everything (automated)
 
-Run in an **admin PowerShell** on Windows:
+Run in an **admin PowerShell** on Windows from a clone of this repo:
 
 ```powershell
-$dl = "$env:USERPROFILE\wsl\ubuntu-roboclaw"
-New-Item -ItemType Directory -Force -Path $dl | Out-Null
-
-Invoke-WebRequest `
-  -Uri https://cloud-images.ubuntu.com/wsl/releases/24.04/current/ubuntu-noble-wsl-amd64-24.04-lts.rootfs.tar.gz `
-  -OutFile "$dl\rootfs.tar.gz"
-
-wsl --import Ubuntu-roboclaw "$dl" "$dl\rootfs.tar.gz" --version 2
-
-# Create a non-root user named hafnium (swap in your own login)
-wsl -d Ubuntu-roboclaw -- bash -c `
-  "adduser --disabled-password --gecos '' hafnium && usermod -aG sudo hafnium && echo 'hafnium ALL=(ALL) NOPASSWD:ALL' > /etc/sudoers.d/hafnium"
-
-wsl -d Ubuntu-roboclaw -- bash -c "printf '[user]\ndefault=hafnium\n[boot]\nsystemd=true\n' > /etc/wsl.conf"
-
-wsl --terminate Ubuntu-roboclaw
+cd <path-to-RoboClaw>\scripts
+.\bootstrap_distro.ps1
 ```
+
+What the script does (all idempotent):
+1. Downloads the Ubuntu 24.04 WSL rootfs to `$env:USERPROFILE\wsl\ubuntu-roboclaw\rootfs.tar.gz` (cached).
+2. `wsl --import`s `Ubuntu-roboclaw` if the distro does not already exist.
+3. Tar-packs `provision_distro.sh`, `setup-udev.sh`, `install-interop-guard.sh`, and `deploy.sh` into the distro at `/root/bootstrap/` — the canonical in-distro location.
+4. Runs `provision_distro.sh` as root inside the distro to create the `hafnium` user with passwordless sudo, write `/etc/wsl.conf`, install Docker Engine via `get.docker.com`, register udev rules for the CH343 USB-serial chips, and enable the WSLInterop guard systemd timer (see §13 Troubleshooting for what the guard does).
+5. Terminates the distro so `[user]` default + `[boot] systemd=true` take effect on next launch.
 
 `Ubuntu-roboclaw` does **not** become the default WSL distro. Always invoke it
 explicitly with `wsl -d Ubuntu-roboclaw`.
 
 ---
 
-## 4. Install Docker Engine inside `Ubuntu-roboclaw`
+## 4. End-to-end bringup (cloning, build, onboard)
 
-```bash
-wsl -d Ubuntu-roboclaw
-sudo apt update
-sudo apt install -y ca-certificates curl gnupg git usbutils
-curl -fsSL https://get.docker.com | sudo sh
-sudo usermod -aG docker $USER
-```
-
-Restart the distro so the `docker` group membership takes effect:
+After the bootstrap completes, one more admin-PS line does the clone, Docker
+build, and onboard:
 
 ```powershell
-wsl --terminate Ubuntu-roboclaw
-wsl -d Ubuntu-roboclaw
-docker run --rm hello-world
+wsl -d Ubuntu-roboclaw -u root -- bash /root/bootstrap/deploy.sh
 ```
 
-Verify `systemctl status docker` shows `active (running)`. If not, confirm
-`[boot] systemd=true` is present in `/etc/wsl.conf` and restart the distro.
+(Equivalently: `bash $env:USERPROFILE\wsl\ubuntu-roboclaw\bootstrap\deploy.sh` — `bootstrap_distro.ps1` stages a copy into `$WslRoot\bootstrap\` so you can invoke either path.)
 
----
+What `deploy.sh` does (all idempotent):
+1. **Provisioning**: skipped if `/etc/roboclaw/provisioned.v<N>` marker matches the current schema version; otherwise re-runs `provision_distro.sh`. Bump the version (`PROVISION_SCHEMA` in `deploy.sh`) when you add new provisioner steps to force re-provisioning of existing distros.
+2. **Repo sync**: clones `https://github.com/hafnium49/RoboClaw.git` into `/home/hafnium/RoboClaw/` with `--recurse-submodules`, or pulls if already present.
+3. **Image build**: `docker compose build roboclaw-web` (multi-stage; ~10 min first run, ~30s on re-runs with cache hits).
+4. **Onboard**: `docker compose run --rm roboclaw-web onboard` scaffolds `~/.roboclaw/`.
 
-## 5. Clone the repository inside the distro
+Expected final image size: ~2.5 GB (ffmpeg + libav* runtime libs contribute ~150 MB; CPU-only torch wheel is ~180 MB vs 900 MB for CUDA).
+
+Interactive steps that deploy.sh does NOT do (you run manually after):
 
 ```bash
 wsl -d Ubuntu-roboclaw
-git clone --recurse-submodules https://github.com/hafnium49/RoboClaw.git ~/RoboClaw
 cd ~/RoboClaw
-git remote add upstream https://github.com/MINT-SJTU/RoboClaw.git
-```
-
-The embodied engine lives at `roboclaw/embodied/engine` as a submodule. If you
-cloned without `--recurse-submodules`, run `git submodule update --init --recursive`.
-
----
-
-## 6. Build the image
-
-```bash
-cd ~/RoboClaw
-docker compose build roboclaw-web
-```
-
-The build produces three stages:
-1. `node:20-slim` builds `ui/dist/` (React + Vite).
-2. `node:20-slim` builds `bridge/dist/` (WhatsApp Baileys bridge).
-3. `ghcr.io/astral-sh/uv:python3.12-bookworm-slim` installs the Python
-   package in editable mode and copies the two `dist/` trees into place.
-
-Expected final image size: ~600–700 MB.
-
----
-
-## 7. First-run initialization (no hardware required)
-
-Scaffold the config + workspace on the ext4 filesystem:
-
-```bash
-docker compose run --rm roboclaw-web onboard
+docker compose run --rm roboclaw-web provider login openai-codex
+# browser opens, complete OAuth flow
+nano ~/.roboclaw/config.json          # set agents.defaults.model
+docker compose run --rm roboclaw-web agent -m "hello"
 ```
 
 This populates `/home/hafnium/.roboclaw/` (bind-mounted into the container at
@@ -175,32 +136,20 @@ This populates `/home/hafnium/.roboclaw/` (bind-mounted into the container at
 
 ---
 
-## 8. Provider login (openai-codex OAuth)
+## 5. Provider login (openai-codex OAuth) — mechanics
 
-Port `1455` is exposed by `docker-compose.yml`. Run the login interactively:
+The login line in §4 works because port `1455` is exposed by `docker-compose.yml`:
+the provider opens an `HTTPServer` on `localhost:1455` **inside the container**,
+Docker forwards that to Windows `127.0.0.1:1455`, your Windows browser hits the
+redirect, and the flow completes. The token lands in `~/.roboclaw/` with proper
+`0600` perms on the ext4 volume.
 
-```bash
-docker compose run --rm roboclaw-web provider login openai-codex
-```
-
-The provider opens an `HTTPServer` on `localhost:1455` **inside the container**;
-Docker forwards that to Windows `127.0.0.1:1455`; your Windows browser hits the
-redirect and completes the flow. The token lands in `~/.roboclaw/` with proper
-`0600` perms.
-
-Edit `~/.roboclaw/config.json` afterwards to set
-`agents.defaults.model` to the Codex model you want (see
-`roboclaw/providers/openai_codex_provider.py` for accepted identifiers).
-
-Smoke-test the provider wiring:
-
-```bash
-docker compose run --rm roboclaw-web agent -m "hello"
-```
+Accepted model identifiers live in `roboclaw/providers/openai_codex_provider.py`
+— set the one you want in `agents.defaults.model` of `~/.roboclaw/config.json`.
 
 ---
 
-## 9. Route USB into `Ubuntu-roboclaw`
+## 6. Route USB into `Ubuntu-roboclaw`
 
 Do **not** modify any existing `attach_usb_wsl.ps1` — that one routes the same
 BUSIDs to your other project's distro. Instead, use the committed script:
@@ -236,7 +185,7 @@ Task Scheduler entry triggered **At log on**, running hidden.
 
 ---
 
-## 10. Start the runtime
+## 7. Start the runtime
 
 ```bash
 wsl -d Ubuntu-roboclaw
@@ -259,9 +208,9 @@ docker compose exec roboclaw-web roboclaw status
 
 ---
 
-## 11. Embodied onboarding (bimanual SO-101)
+## 8. Embodied onboarding (bimanual SO-101)
 
-### 11.1 Calibrate arms (CLI only)
+### 8.1 Calibrate arms (CLI only)
 
 ```bash
 docker compose exec -it roboclaw-web roboclaw agent
@@ -273,7 +222,7 @@ termios raw-mode path in `roboclaw/embodied/toolkit/tty.py` needs a PTY. The
 browser-based calibration panel will hang in this deployment — that is a known
 constraint of the detached `web start` container.
 
-### 11.2 Bind arms and cameras
+### 8.2 Bind arms and cameras
 
 After calibration, use the dashboard's Setup panel (or the agent with embodied
 tools) to build the manifest:
@@ -286,7 +235,7 @@ Bind arms by their stable `/dev/serial/by-id/usb-...` paths (visible in the
 script's verification output). `ttyACM` indices reshuffle on replug; `by-id`
 does not.
 
-### 11.3 Teleop / record / replay / infer (dashboard)
+### 8.3 Teleop / record / replay / infer (dashboard)
 
 Once bound, those four workflows run fine from the browser dashboard — they do
 not need a PTY. Bimanual mode activates automatically:
@@ -295,9 +244,9 @@ not need a PTY. Bimanual mode activates automatically:
 
 ---
 
-## 12. Operating procedures
+## 9. Operating procedures
 
-### 12.1 Switching the robot between projects
+### 9.1 Switching the robot between projects
 
 Only one WSL distro can own a given USB device at a time, so switching projects
 is explicit:
@@ -317,14 +266,14 @@ Stop the RoboClaw container before detaching, to avoid mid-op failures:
 docker compose stop roboclaw-web
 ```
 
-### 12.2 Persistent auto-attach across reboots
+### 9.2 Persistent auto-attach across reboots
 
 Register `attach_usb_roboclaw.ps1` as a Windows Task Scheduler task:
 - Trigger: **At log on of any user**.
 - Action: `powershell.exe -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File "<full path>\attach_usb_roboclaw.ps1"`.
 - Run with highest privileges.
 
-### 12.3 Data persistence
+### 9.3 Data persistence
 
 - `/home/hafnium/.roboclaw/` — config, workspace, memory, session state.
 - Named volume `hf_cache` — LeRobot dataset cache at
@@ -340,7 +289,7 @@ docker run --rm -v hf_cache:/data -v /tmp:/out alpine \
   tar czf /out/hf_cache-$(date +%F).tgz -C /data .
 ```
 
-### 12.4 Logs
+### 9.4 Logs
 
 JSON logs rotate at 10 MB × 3 files per service:
 
@@ -349,7 +298,7 @@ docker compose logs -f roboclaw-web
 docker compose logs --tail 500 roboclaw-web
 ```
 
-### 12.5 Updating to a newer RoboClaw
+### 9.5 Updating to a newer RoboClaw
 
 ```bash
 cd ~/RoboClaw
@@ -364,7 +313,7 @@ deployment mode.
 
 ---
 
-## 13. Troubleshooting
+## 10. Troubleshooting
 
 | Symptom | Likely cause | Fix |
 |---------|--------------|-----|
@@ -379,7 +328,7 @@ deployment mode.
 
 ---
 
-## 14. Explicit non-goals of this deployment
+## 11. Explicit non-goals of this deployment
 
 - Running two containers against the same `~/.roboclaw` volume (flock
   semantics over a bind mount are not verified for multi-writer).
@@ -393,7 +342,7 @@ deployment mode.
 
 ---
 
-## 15. Referenced repo files
+## 12. Referenced repo files
 
 | File | What it anchors |
 |------|-----------------|
