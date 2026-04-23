@@ -32,15 +32,17 @@ RUN apt-get update \
 WORKDIR /app
 
 # Install Python deps (layer-cached on pyproject/uv.lock)
+# pyproject.toml force-includes `bridge/` into the wheel, so its source must
+# be present when hatchling runs during `uv pip install -e .`.
 COPY pyproject.toml uv.lock README.md LICENSE ./
 COPY roboclaw/ roboclaw/
+COPY bridge/   bridge/
 RUN uv pip install --system --no-cache -e .
 
-# Built artifacts from earlier stages
+# Built artifacts from earlier stages (merged into the already-copied bridge/ dir)
 COPY --from=ui-builder     /app/ui/dist              /app/ui/dist
 COPY --from=bridge-builder /app/bridge/dist          /app/bridge/dist
 COPY --from=bridge-builder /app/bridge/node_modules  /app/bridge/node_modules
-COPY bridge/package.json   /app/bridge/package.json
 
 RUN mkdir -p /root/.roboclaw /root/.cache/huggingface
 
