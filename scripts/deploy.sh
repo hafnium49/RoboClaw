@@ -97,8 +97,13 @@ WORKSPACE="/home/${ROBOCLAW_USER}/.roboclaw"
 mkdir -p "${WORKSPACE}"
 chown -R "${ROBOCLAW_USER}:${ROBOCLAW_USER}" "${WORKSPACE}"
 
+# Bypass `docker compose run` here: the compose service pins
+# devices=[/dev/ttyACM*,...] which requires USB passthrough to be live.
+# `onboard` doesn't touch hardware — it just scaffolds ~/.roboclaw — so
+# invoke the already-built image directly via `docker run`, and only
+# mount the workspace volume.
 sudo -u "${ROBOCLAW_USER}" -H -- bash -c \
-    "cd '${REPO_DIR}' && sg docker -c 'docker compose run --rm roboclaw-web onboard'"
+    "sg docker -c 'docker run --rm -v ${WORKSPACE}:/root/.roboclaw roboclaw:local onboard'"
 
 LOG "deploy.sh completed successfully"
 cat <<EOF
