@@ -6,6 +6,12 @@ x-common-config: &common-config
   volumes:
     - /home/hafnium/.roboclaw:/root/.roboclaw
     - hf_cache:/root/.cache/huggingface
+    # oauth_cli_kit persists tokens via platformdirs at /root/.local/share/<app>/auth/.
+    # Bind this to a host path so OAuth logins survive `--rm` containers and restarts.
+    - /home/hafnium/.roboclaw-local-share:/root/.local/share
+    # Expose /dev/serial/by-id/ so roboclaw/embodied/embodiment/hardware/scan.py
+    # can bind arms by stable ID (ttyACM indices shuffle on replug).
+    - /dev/serial:/dev/serial:ro
   logging:
     driver: json-file
     options:
