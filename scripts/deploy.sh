@@ -105,6 +105,10 @@ chown -R "${ROBOCLAW_USER}:${ROBOCLAW_USER}" "${WORKSPACE}"
 sudo -u "${ROBOCLAW_USER}" -H -- bash -c \
     "sg docker -c 'docker run --rm -v ${WORKSPACE}:/root/.roboclaw roboclaw:local onboard'"
 
+# The container ran as root, so scaffolded files are root-owned. Re-chown
+# to the target user so they can edit config.json without sudo.
+chown -R "${ROBOCLAW_USER}:${ROBOCLAW_USER}" "${WORKSPACE}"
+
 LOG "deploy.sh completed successfully"
 cat <<EOF
 
