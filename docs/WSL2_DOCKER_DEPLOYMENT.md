@@ -115,23 +115,49 @@ What `deploy.sh` does (all idempotent):
 1. **Provisioning**: skipped if `/etc/roboclaw/provisioned.v<N>` marker matches the current schema version; otherwise re-runs `provision_distro.sh`. Bump the version (`PROVISION_SCHEMA` in `deploy.sh`) when you add new provisioner steps to force re-provisioning of existing distros.
 2. **Repo sync**: clones `https://github.com/hafnium49/RoboClaw.git` into `/home/hafnium/RoboClaw/` with `--recurse-submodules`, or pulls if already present.
 3. **Image build**: `docker compose build roboclaw-web` (multi-stage; ~10 min first run, ~30s on re-runs with cache hits).
-4. **Onboard**: `docker compose run --rm roboclaw-web onboard` scaffolds `~/.roboclaw/`.
+4. **Onboard**: `docker run --rm -v ~/.roboclaw:/root/.roboclaw roboclaw:local onboard` scaffolds `~/.roboclaw/`. Bypasses `docker compose run` deliberately — the compose service pins `devices: [/dev/ttyACM*..]`, which on first bringup (before USB attach) would fail with "error gathering device information … no such file or directory". Plain `docker run` doesn't inherit that constraint. See commit `53a5eb8` for context.
 
 Expected final image size: ~2.5 GB (ffmpeg + libav* runtime libs contribute ~150 MB; CPU-only torch wheel is ~180 MB vs 900 MB for CUDA).
 
-Interactive steps that deploy.sh does NOT do (you run manually after):
+Interactive steps that deploy.sh does NOT do (you run manually after). Two
+paths depending on whether USB passthrough is already live:
 
+**Path A (recommended) — attach USB first, then use compose.** `docker compose
+run` inherits the `roboclaw-web` service's `devices:` list, so `/dev/ttyACM*`
+must exist in the distro first:
+
+```powershell
+# 1. Admin PowerShell on Windows:
+.\scripts\attach_usb_roboclaw.ps1
+```
 ```bash
+# 2. Inside Ubuntu-roboclaw:
 wsl -d Ubuntu-roboclaw
 cd ~/RoboClaw
-docker compose run --rm roboclaw-web provider login openai-codex
-# browser opens, complete OAuth flow
-nano ~/.roboclaw/config.json          # set agents.defaults.model
-docker compose run --rm roboclaw-web agent -m "hello"
+docker compose run --rm roboclaw-web provider login openai-codex   # OAuth (browser opens)
+nano ~/.roboclaw/config.json                                       # set agents.defaults.model
+docker compose run --rm roboclaw-web agent -m "hello"              # smoke test
 ```
 
-This populates `/home/hafnium/.roboclaw/` (bind-mounted into the container at
-`/root/.roboclaw`) with `config.json` and
+**Path B — OAuth / smoke test before USB is available.** Bypass compose with
+plain `docker run` and pass the port/volume flags the compose service would
+have provided. Same image, no `devices:` constraint:
+
+```bash
+# Provider login — needs port 1455 for the OAuth redirect from the Windows browser:
+docker run --rm -it -p 127.0.0.1:1455:1455 \
+    -v ~/.roboclaw:/root/.roboclaw \
+    roboclaw:local provider login openai-codex
+
+# Set agents.defaults.model (same as Path A):
+nano ~/.roboclaw/config.json
+
+# Smoke test — no port needed, no hardware needed:
+docker run --rm -v ~/.roboclaw:/root/.roboclaw roboclaw:local agent -m "hello"
+```
+
+Either path populates `/home/hafnium/.roboclaw/` (bind-mounted into the
+container at `/root/.roboclaw`) with `config.json` and
 `workspace/{AGENTS,SOUL,TOOLS,USER,HEARTBEAT}.md` plus `memory/MEMORY.md`.
 
 ---
