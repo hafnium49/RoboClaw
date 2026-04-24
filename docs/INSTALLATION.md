@@ -1,8 +1,14 @@
 # RoboClaw Installation Guide
 
-This guide is the native host installation path. RoboClaw uses `uv` as the only supported Python environment and dependency workflow. If you want Docker-based workflows, use:
+This guide is the native-host installation path. RoboClaw uses `uv` as the only supported Python environment and dependency workflow.
 
-- [Docker Installation](./DOCKERINSTALLATION.md)
+**Pick the right install path for your use case:**
+
+| Use case | Guide |
+|----------|-------|
+| Native Linux / macOS with or without local hardware; or WSL2 where you're happy running Python directly on the distro | **this document** |
+| Minimal, stateless Docker for a pure-LLM agent / dashboard sandbox (no hardware) | [Docker Installation](./DOCKERINSTALLATION.md) |
+| Windows 11 + WSL2, with SO-101 arms + cameras to drive via `usbipd` passthrough | [WSL2 + Docker Deployment](./WSL2_DOCKER_DEPLOYMENT.md) |
 
 ## 1. Install uv
 
@@ -108,7 +114,7 @@ This tells you which providers are already available on the current machine.
 
 Two common cases:
 
-### 5.1 OAuth provider
+### 6.1 OAuth provider
 
 If you are using an OAuth-based provider, log in directly.
 
@@ -119,7 +125,7 @@ uv run roboclaw provider login openai-codex
 uv run roboclaw provider login github-copilot
 ```
 
-### 5.2 API key provider
+### 6.2 API key provider
 
 If you are using an API-key-based provider, edit:
 

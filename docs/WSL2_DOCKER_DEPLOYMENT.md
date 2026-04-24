@@ -349,9 +349,14 @@ deployment mode.
 
 | File | What it anchors |
 |------|-----------------|
-| `Dockerfile` | Multi-stage build, editable install, exposed ports. |
+| `Dockerfile` | Multi-stage build, editable install, exposed ports, CPU-torch index, evdev + ffmpeg runtime deps. |
 | `docker-compose.yml` | `roboclaw-web` service, devices, cgroup rules, volumes, healthcheck. |
+| `scripts/bootstrap_distro.ps1` | Windows orchestrator: rootfs download, `wsl --import`, tar-packs scripts into `/root/bootstrap/`. |
+| `scripts/provision_distro.sh` | In-distro provisioner: user, wsl.conf, Docker Engine, udev rules, interop guard. |
+| `scripts/deploy.sh` | Idempotent end-to-end bringup (provision + clone + build + onboard) with marker-file-versioned skip. |
+| `scripts/install-interop-guard.sh` | Systemd unit + timer that re-registers `WSLInterop` binfmt_misc when wiped. |
 | `scripts/attach_usb_roboclaw.ps1` | Windows-side USB routing to `Ubuntu-roboclaw`. |
+| `scripts/setup-udev.sh` | CH343 (`idVendor=0x1a86`) + video4linux udev rules. |
 | `roboclaw/http/server.py:297` | UI path resolution; relies on editable install. |
 | `roboclaw/providers/openai_codex_provider.py` | OAuth callback on port 1455. |
 | `roboclaw/embodied/toolkit/tty.py` | Termios raw-mode handoff (PTY-only). |
@@ -360,3 +365,22 @@ deployment mode.
 | `roboclaw/embodied/command/builder.py:22-25` | Bimanual SO-101 preset `_BIMANUAL["so101"]`. |
 | `docs/INSTALLATION.md` | Native uv path (alternative to this doc). |
 | `docs/DOCKERINSTALLATION.md` | Minimal stateless Docker path (alternative to this doc). |
+
+---
+
+## 13. Session commit chain (reference)
+
+This deployment was brought up incrementally. Each commit below corresponds to a specific failure surfaced by the build log; preserved here so a future operator hitting a regression can `git bisect` around the exact fix rather than guessing.
+
+| Commit | Area | Purpose |
+|--------|------|---------|
+| `81664a8` | interop guard | New `scripts/install-interop-guard.sh`: systemd oneshot + 30s timer re-registers `WSLInterop` when it's wiped by cross-distro `/init` cleanup. |
+| `49d8e6e` | provisioner | `provision_distro.sh` calls the guard installer; `bootstrap_distro.ps1` tar-packs the new script into `/root/bootstrap/`. |
+| `53c555c` | Dockerfile | ui-builder copies `roboclaw/i18n/{common,setup}.json` before `npm run build`; stage-2 guards missing LeRobot submodule; CPU-only torch index (saves ~4 GB download); `PYTHONDONTWRITEBYTECODE=1`. |
+| `f4a7591` | build deps | Add `linux-libc-dev` + ffmpeg runtime libs (`libavcodec59`, `libavformat59`, `libavutil57`, `libswresample4`, `libswscale6`) to stage-2 apt; drop the `[pi]` extra from `lerobot[…]` in `pyproject.toml` (GPIO-only, useless on WSL2 x86_64). |
+| `d848a1a` | deploy.sh | Promoted from staged-only `/mnt/c/.../deploy.sh` into `scripts/deploy.sh`; reads exclusively from `/root/bootstrap/` (the canonical in-distro location written by `bootstrap_distro.ps1`); marker-file-versioned provisioning skip at `/etc/roboclaw/provisioned.v<N>`. |
+| `2fe2a28` | build toolchain | Add `build-essential` to stage-2: the uv base image didn't ship `gcc`, so `evdev`'s C-extension source build couldn't compile despite `linux-libc-dev` being present. |
+| `53a5eb8` | deploy.sh | Bypass `docker compose run` for the `onboard` step; use plain `docker run` against `roboclaw:local` with only the workspace volume. Fixes first-bringup chicken-and-egg: compose's `devices: [/dev/ttyACM0..]` would fail before USB passthrough is active. |
+| `d7f732e` | deploy.sh | `chown -R ${ROBOCLAW_USER}` on `~/.roboclaw` after the root-uid container run; lets the operator edit `config.json` without sudo. |
+
+End-to-end time on a warm cache: ~14 seconds (deploy.sh run 6 on day 2). Cold build: ~10 minutes dominated by apt/npm/uv downloads.
