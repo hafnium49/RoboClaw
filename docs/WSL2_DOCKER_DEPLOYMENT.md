@@ -354,6 +354,9 @@ deployment mode.
 | `wsl.exe`/`pwsh.exe` from the Ubuntu shell fails with `Exec format error` | Known WSL2 bug: cross-distro `wsl -d Ubuntu-roboclaw ...` exit cleanup unregisters the kernel-shared `WSLInterop` binfmt entry | `install-interop-guard.sh` is enabled by §3 inside `Ubuntu-roboclaw` and restores the entry within ~30s. For the operator's `Ubuntu` distro, run the guard installer once: `wsl -d Ubuntu -u root -- bash /mnt/c/Users/<you>/wsl/ubuntu-roboclaw/bootstrap/install-interop-guard.sh`. Check with `systemctl is-active wsl-interop-guard.timer`. |
 | `uv pip install` dies on `evdev==1.9.3` with missing `linux/input.h` | Runtime base image lacks kernel headers | Committed fix in `f4a7591`: stage-2 installs `linux-libc-dev`. If you see this, you're on a stale build — rebuild. |
 | `roboclaw agent` ImportErrors on `torchcodec` / `av` | Runtime missing ffmpeg shared libs | Committed fix in `f4a7591`: stage-2 installs `ffmpeg libavcodec59 libavformat59 libavutil57 libswresample4 libswscale6`. If you see this, rebuild. |
+| `provider login openai-codex` prints `✓ Authenticated with OpenAI Codex` but the next `agent -m "hello"` replies `OAuth credentials not found` | `docker compose run --rm …` wrote the token to the ephemeral writable overlay that Docker deletes on `--rm`. `oauth_cli_kit` stores tokens via `platformdirs.user_data_dir("openai-codex")` which resolves to `/root/.local/share/openai-codex/auth/<token>.json`. That path was NOT originally mounted. | Committed fix in `0adc679`: `docker-compose.yml` now binds `/home/hafnium/.roboclaw-local-share:/root/.local/share`, persisting the token to host ext4. Prefer `docker compose exec roboclaw-web roboclaw provider login openai-codex` over `docker compose run --rm …` so the token is written into the already-mounted persistent container. If you must use `docker compose run`, drop the `--rm` and extract via `docker cp <cid>:/root/.local/share /home/hafnium/.roboclaw-local-share/` before `docker rm <cid>`. |
+| Arm manifest binds to raw `/dev/ttyACMx` instead of `/dev/serial/by-id/usb-1a86_*` | Docker's `devices:` passes raw device inodes but not udev's `/dev/serial/` symlink tree; scan.py falls back to `ttyACMx` indices that shuffle on replug | Committed fix in `0adc679`: `docker-compose.yml` now binds `/dev/serial:/dev/serial:ro`, exposing udev's stable `usb-1a86_USB_Single_Serial_<SN>` symlinks inside the container. Re-record the manifest via the dashboard or `roboclaw agent` once — it will pick up by-id paths automatically. |
+| `docker compose run --rm roboclaw-web provider login openai-codex` succeeds but container and its filesystem are gone on next `docker ps -a` | `--rm` is atomic with process exit: Docker removes the container and its upper overlay simultaneously. Any file written to a non-mounted path during the run is unrecoverable. | Never use `--rm` for a command that writes state you care about. Use `docker compose exec` against the running service (all mounts active), or `docker compose run` (no `--rm`) and clean up with explicit `docker rm` after extracting anything needed via `docker cp` / `docker diff`. |
 
 ---
 
@@ -408,5 +411,42 @@ This deployment was brought up incrementally. Each commit below corresponds to a
 | `2fe2a28` | build toolchain | Add `build-essential` to stage-2: the uv base image didn't ship `gcc`, so `evdev`'s C-extension source build couldn't compile despite `linux-libc-dev` being present. |
 | `53a5eb8` | deploy.sh | Bypass `docker compose run` for the `onboard` step; use plain `docker run` against `roboclaw:local` with only the workspace volume. Fixes first-bringup chicken-and-egg: compose's `devices: [/dev/ttyACM0..]` would fail before USB passthrough is active. |
 | `d7f732e` | deploy.sh | `chown -R ${ROBOCLAW_USER}` on `~/.roboclaw` after the root-uid container run; lets the operator edit `config.json` without sudo. |
+| `a9cc9fd` | docs | Three-row decision table at the top of each install guide; `docs/INSTALLATION.md` renamed 5.1/5.2 → 6.1/6.2; `docs/DOCKERINSTALLATION.md` documents submodule requirement + explicit "doesn't cover" list; WSL2 guide §12 expanded + new §13 session commit chain. |
+| `6f4320f` | docs | Fix stale §4 Step 4 description (onboard uses `docker run`, not `docker compose run`); add Path A (USB first → compose) / Path B (no-USB → `docker run` direct) for post-deploy interactive commands. |
+| `0adc679` | compose | Add two volumes to `roboclaw-web`: `/home/hafnium/.roboclaw-local-share:/root/.local/share` for oauth_cli_kit token persistence across `--rm` containers, and `/dev/serial:/dev/serial:ro` so arm manifests can bind to udev's stable `/dev/serial/by-id/usb-1a86_*` symlinks instead of shuffling ttyACMx indices. |
 
 End-to-end time on a warm cache: ~14 seconds (deploy.sh run 6 on day 2). Cold build: ~10 minutes dominated by apt/npm/uv downloads.
+
+---
+
+## 14. Operational lessons learned (runtime session notes)
+
+Findings from the first end-to-end bringup with real hardware, preserved so a future operator doesn't re-learn them:
+
+**USB passthrough mechanics (non-obvious even though the pieces are standard):**
+- `usbipd bind --force` is the one-time admin step and persists across Windows reboots. `usbipd attach --wsl <distro>` does **not** require admin, only that the target distro is running.
+- If `usbipd attach` errors with `The selected WSL distribution is not running`, wake the target by starting any process in it (e.g. `wsl -d Ubuntu-roboclaw -- sh -c 'sleep 600' &` from Windows) before the attach loop. Keep that sleep alive or attach multiple BUSIDs back-to-back before the distro idles out.
+- After `usbipd attach`, the distro's udev populates both `/dev/ttyACMx` (with CH343 vendor 0x1a86 rule giving `crw-rw-rw-`) and `/dev/serial/by-id/usb-1a86_USB_Single_Serial_<SN>`. The by-id path is stable across replugs; the `ttyACMx` index is not.
+
+**Docker + USB:**
+- `--device /dev/ttyACM0` passes the raw device inode but not udev's symlink tree. Without the compose binding `/dev/serial:/dev/serial:ro`, the container sees the raw nodes but cannot resolve by-id. Commit `0adc679` added that bind.
+- Compose's `devices:` list fails at `docker run`/`docker compose run` time if the node doesn't exist at the host. This is the chicken-and-egg on first bringup that commit `53a5eb8` worked around for `onboard` by using plain `docker run` (no service definition).
+- The device cgroup rules in compose (majors 81/166/188/189) are what allow newly-plugged devices of those types to appear inside a running container without a restart. They're defensive — the container already has its `--device` inodes at start.
+
+**OAuth + ephemeral containers:**
+- `oauth_cli_kit` stores tokens via `platformdirs.user_data_dir("openai-codex")` → `/root/.local/share/openai-codex/auth/`. This is NOT under the existing `/root/.roboclaw` bind mount by default. Commit `0adc679` added the separate `.local/share` bind to fix this.
+- `docker compose run --rm` with a login flow is a trap: the login succeeds, prints the token expiry, then the container deletes itself on exit, and the token is gone. `roboclaw status` will still show `OpenAI Codex: ✓ (OAuth)` because that status check tests the *capability* (provider config present), not the actual token state. The next real model call fails with `OAuth credentials not found`. The clean pattern is:
+  - `docker compose exec <service> roboclaw provider login openai-codex` against the persistent running service (all mounts active) — preferred.
+  - `docker compose run` (no `--rm`) + `docker cp <cid>:/root /dest/` + `docker rm <cid>` — fallback when the service isn't running.
+
+**Interop guard (the session's load-bearing piece of infra):**
+- Verified across a full PC restart: `systemctl enable --now wsl-interop-guard.timer` at install time writes `/etc/systemd/system/timers.target.wants/wsl-interop-guard.timer`. On every WSL2 boot, systemd replays the symlink and the timer auto-starts. No re-install needed.
+- Observed this session: one cross-distro `wsl.exe` call wiped `WSLInterop` mid-run; the guard restored it in **3 seconds** (not the 30s worst case). `journalctl -u wsl-interop-guard` empty until the wipe, one line after, back to silent.
+
+**Build caching:**
+- Warm-cache deploy.sh end-to-end: ~14 seconds (provisioning SKIPs via marker, repo pulls, cached Docker layers, onboard is a single `docker run`).
+- Cold build: ~10 min (apt + npm + uv downloads dominate). CPU-only torch cuts this from the original ~25 min.
+- Rebuilding the image invalidates the stage-3 `uv pip install` layer whenever `roboclaw/**` or `pyproject.toml` changes, triggering a full Python-dep re-resolve (not re-download if the wheels are still in uv's cache dir, but recomputation is ~30-90s).
+
+**`WSLInterop` drop effects I hit during driving this remotely:**
+- Even with the guard, a just-fired cross-distro call can leave a ~0-3s window where `wsl.exe` returns `Exec format error`. Retrying within 10s almost always succeeds. Commands I issued during that window failed once and worked the second time.
