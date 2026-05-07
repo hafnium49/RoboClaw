@@ -394,6 +394,7 @@ deployment mode.
 | `roboclaw/embodied/command/builder.py:22-25` | Bimanual SO-101 preset `_BIMANUAL["so101"]`. |
 | `docs/INSTALLATION.md` | Native uv path (alternative to this doc). |
 | `docs/DOCKERINSTALLATION.md` | Minimal stateless Docker path (alternative to this doc). |
+| `docs/SO101_BIMANUAL_DRIVER.md` | Driver-source decision (RoboClaw's LeRobot fork vs upstream PyPI vs phosphobot) for bimanual SO-101, with verification probe. |
 
 ---
 

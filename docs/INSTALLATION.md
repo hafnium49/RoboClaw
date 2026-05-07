@@ -33,7 +33,7 @@ git clone --recurse-submodules https://github.com/MINT-SJTU/RoboClaw.git
 cd RoboClaw
 ```
 
-The embodied engine lives in `roboclaw/embodied/engine` as a git submodule and is required during installation.
+The embodied engine lives in `roboclaw/embodied/engine` as a git submodule and is required during installation. It vendors a LeRobot fork; see [SO101_BIMANUAL_DRIVER.md](./SO101_BIMANUAL_DRIVER.md) for why we use the fork instead of pinning the upstream PyPI release of `lerobot`.
 
 If you already cloned the repository without submodules, run:
 

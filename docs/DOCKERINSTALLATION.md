@@ -21,7 +21,8 @@ guide above.
 
 Start from a clean clone with submodules populated — the Dockerfile's stage-2
 has a defensive guard that fails the build if `roboclaw/embodied/engine/` is
-empty:
+empty. The submodule vendors a LeRobot fork; see
+[SO101_BIMANUAL_DRIVER.md](./SO101_BIMANUAL_DRIVER.md) for the rationale.
 
 ```bash
 git clone --recurse-submodules https://github.com/MINT-SJTU/RoboClaw.git
