@@ -395,6 +395,7 @@ deployment mode.
 | `docs/INSTALLATION.md` | Native uv path (alternative to this doc). |
 | `docs/DOCKERINSTALLATION.md` | Minimal stateless Docker path (alternative to this doc). |
 | `docs/SO101_BIMANUAL_DRIVER.md` | Driver-source decision (RoboClaw's LeRobot fork vs upstream PyPI vs phosphobot) for bimanual SO-101, with verification probe. |
+| `docs/FORK_PROGRESS_REPORT.md` | Standalone fork-vs-upstream progress report (commit timeline, validation status, churn signals). |
 
 ---
 
