@@ -7,7 +7,7 @@ from threading import Event
 from typing import Any
 
 from roboclaw.embodied.board import Board, SessionState
-from roboclaw.embodied.calibration.model import CalibrationBatchResult
+from roboclaw.embodied.calibration.model import CalibrationBatchResult, CalibrationProfile
 from roboclaw.embodied.calibration.so101 import AutoCalibrationStopped, SO101AutoCalibrationStrategy
 from roboclaw.embodied.calibration.store import CalibrationStore
 from roboclaw.embodied.embodiment.arm.registry import get_model
@@ -91,13 +91,6 @@ class AutoCalibrationBatch:
                     eligible=False,
                 ))
                 continue
-            if not self._store.has_profile(arm):
-                items.append(_BatchItem(
-                    arm=arm,
-                    result=CalibrationBatchResult(alias=arm.alias, status="skipped", reason="manual_calibration_required"),
-                    eligible=False,
-                ))
-                continue
             items.append(_BatchItem(
                 arm=arm,
                 result=CalibrationBatchResult(alias=arm.alias, status="pending"),
@@ -116,93 +109,85 @@ class AutoCalibrationBatch:
                 )
                 return
 
-            index = 0
-            for position, item in enumerate(items, start=1):
+            active_tasks: dict[asyncio.Task[CalibrationProfile], int] = {}
+            for position, item in enumerate(items):
                 if not item.eligible:
-                    index = position
-                    await self._publish(items, index=index)
                     continue
-                if self._stop_event.is_set():
-                    items = self._mark_remaining_stopped(items, position)
-                    break
-
                 started = time.time()
-                items[position - 1] = replace(
+                items[position] = replace(
                     item,
                     result=replace(item.result, status="running", reason="", started_at=started, finished_at=None),
                 )
-                await self._publish(
-                    items,
-                    index=position,
-                    phase="probing",
-                    current_arm=item.arm.alias,
-                )
-                try:
-                    profile = await asyncio.to_thread(
+                active_tasks[asyncio.create_task(
+                    asyncio.to_thread(
                         self._strategy.recalibrate,
                         item.arm,
                         self._store,
                         stop_event=self._stop_event,
-                    )
-                except AutoCalibrationStopped:
-                    finished = time.time()
-                    items[position - 1] = replace(
-                        items[position - 1],
-                        result=replace(
-                            items[position - 1].result,
-                            status="failed",
-                            reason="stopped",
-                            finished_at=finished,
-                        ),
-                    )
-                    items = self._mark_remaining_stopped(items, position + 1)
-                    index = position
-                    break
-                except Exception as exc:
-                    finished = time.time()
-                    items[position - 1] = replace(
-                        items[position - 1],
-                        result=replace(
-                            items[position - 1].result,
-                            status="failed",
-                            reason=str(exc),
-                            finished_at=finished,
-                        ),
-                    )
-                    index = position
-                    await self._publish(
-                        items,
-                        index=index,
-                        phase="persisting",
-                        current_arm=item.arm.alias,
-                    )
-                    continue
-
-                await self.board.update(
-                    calibration_phase="persisting",
-                    calibration_current_arm=item.arm.alias,
-                    calibration_index=position,
-                )
-                self._store.save_profile(item.arm, profile)
-                self._manifest.mark_arm_calibrated(item.arm.alias)
-                finished = time.time()
-                items[position - 1] = replace(
-                    items[position - 1],
-                    result=replace(
-                        items[position - 1].result,
-                        status="success",
-                        finished_at=finished,
                     ),
+                    name=f"auto-calibration:{item.arm.alias}",
+                )] = position
+
+            await self._publish(
+                items,
+                index=self._completed_count(items),
+                phase="probing" if active_tasks else "done",
+                current_arm=self._running_aliases(items),
+            )
+
+            while active_tasks:
+                done, _ = await asyncio.wait(active_tasks.keys(), return_when=asyncio.FIRST_COMPLETED)
+                for task in done:
+                    position = active_tasks.pop(task)
+                    item = items[position]
+                    finished = time.time()
+                    try:
+                        profile = task.result()
+                    except AutoCalibrationStopped:
+                        items[position] = replace(
+                            item,
+                            result=replace(item.result, status="failed", reason="stopped", finished_at=finished),
+                        )
+                        continue
+                    except Exception as exc:
+                        items[position] = replace(
+                            item,
+                            result=replace(item.result, status="failed", reason=str(exc), finished_at=finished),
+                        )
+                        continue
+
+                    await self.board.update(
+                        calibration_phase="persisting",
+                        calibration_current_arm=item.arm.alias,
+                        calibration_index=self._completed_count(items),
+                    )
+                    try:
+                        self._store.save_profile(item.arm, profile)
+                        self._manifest.mark_arm_calibrated(item.arm.alias)
+                    except Exception as exc:
+                        items[position] = replace(
+                            item,
+                            result=replace(item.result, status="failed", reason=str(exc), finished_at=finished),
+                        )
+                    else:
+                        items[position] = replace(
+                            item,
+                            result=replace(item.result, status="success", finished_at=finished),
+                        )
+
+                await self._publish(
+                    items,
+                    index=self._completed_count(items),
+                    phase="stopped" if self._stop_event.is_set() and active_tasks else "probing",
+                    current_arm=self._running_aliases(items),
                 )
-                index = position
-                await self._publish(items, index=index, phase="done-arm", current_arm=item.arm.alias)
 
             final_phase = "stopped" if self._stop_event.is_set() else "done"
             await self.board.update(
                 state=SessionState.IDLE,
                 calibration_phase=final_phase,
                 calibration_current_arm="",
-                calibration_index=index,
+                calibration_index=self._completed_count(items),
                 calibration_results=[item.result.to_dict() for item in items],
             )
         except Exception as exc:
@@ -216,22 +201,12 @@ class AutoCalibrationBatch:
             if self._exit_callback and not self._stop_event.is_set():
                 self._exit_callback(self)
 
-    def _mark_remaining_stopped(self, items: list[_BatchItem], start_index: int) -> list[_BatchItem]:
-        updated = list(items)
-        for offset in range(start_index - 1, len(updated)):
-            item = updated[offset]
-            if item.result.status != "pending":
-                continue
-            updated[offset] = replace(
-                item,
-                result=replace(
-                    item.result,
-                    status="skipped",
-                    reason="batch_stopped",
-                    finished_at=time.time(),
-                ),
-            )
-        return updated
+    def _completed_count(self, items: list[_BatchItem]) -> int:
+        return sum(1 for item in items if item.result.status in {"success", "skipped", "failed"})
+
+    def _running_aliases(self, items: list[_BatchItem]) -> str:
+        running = [item.arm.alias for item in items if item.result.status == "running"]
+        return ", ".join(running)
 
     async def _publish(
         self,
