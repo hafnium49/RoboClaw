@@ -248,5 +248,5 @@ T1 is the only unblocked starting task on the hardware path. T5 (HUM-6) is unblo
 ## §9 Related artifacts
 
 - **Skill** [`roboclaw-deployment`](file:///home/hafnium/.claude/skills/roboclaw-deployment/SKILL.md) — operator runbook for the stack itself.
-- **Agent** `roboclaw-jira-coordinator` (at `.claude/agents/roboclaw-jira-coordinator.md`) — spawnable subagent that takes a card key (HUM-N) and drives it end-to-end through the Jira lifecycle.
+- **Agent** `roboclaw-breeder` (at `.claude/agents/roboclaw-breeder.md`) — broader stewardship agent that grows the embodied deployment across its lifecycle (bring-up → manifest → calibration → teleop → recording). §2.G of the breeder's prompt contains the focused "drive one Jira card" routine; the rest covers the surrounding embodied work that produces the evidence those cards need.
 - **Repo docs** `docs/WSL2_DOCKER_DEPLOYMENT.md`, `docs/FORK_PROGRESS_REPORT.md`, `docs/SO101_BIMANUAL_DRIVER.md` — referenced by individual cards.
