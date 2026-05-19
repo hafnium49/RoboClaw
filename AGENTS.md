@@ -133,3 +133,62 @@ After `onboard`, `~/.roboclaw/workspace/` contains `AGENTS.md`, `HEARTBEAT.md`, 
 ### Config
 
 Config lives at `~/.roboclaw/config.json` (override with `--config`). `load_runtime_config` returns a Pydantic `Config`; `_make_provider` / `build_provider` selects the LLM provider. `contextWindowTokens` has replaced the deprecated `memoryWindow` field — an onboard refresh warns when old configs are detected.
+
+---
+
+## Deployment scaffolding (fork-specific)
+
+The sections above describe the upstream-shared Python package. The artifacts below are this fork's additions for running a specific bimanual SO-101 deployment on Windows 11 + WSL2 + Docker Engine. A new Claude session opening this repo should treat these as the entry points — they encode the operational knowledge that the Python code alone doesn't carry.
+
+### Repo-level Claude Code tooling
+
+| Path | Role |
+|------|------|
+| `.claude/skills/roboclaw-jira/SKILL.md` | Reference for managing the RoboClaw thread on the `HUM` (Humanoid) Jira project — cloudId, label convention, Japanese issue type names (`タスク`/`エピック`), the standalone six-section card template, markdown→ADF gotchas, and common ops (create / edit / transition / link / query). Auto-loads when Jira/RoboClaw triggers fire. |
+| `.claude/agents/roboclaw-breeder.md` | Spawnable subagent (`subagent_type: roboclaw-breeder`) that stewards the embodiment across its lifecycle — bring-up, manifest binding, calibration coordination, teleop & recording supervision, Jira card execution (§2.G), and doc hygiene. Carries non-negotiable welfare rules (no synthetic calibration, no torque on uncalibrated arms, no `--rm` for stateful commands, no Done-without-evidence). |
+| `.claude/settings.local.json` | Operator-personal sandbox allowlist. Not synced to other clones. |
+
+### Deployment scripts (`scripts/`)
+
+| File | Purpose |
+|------|---------|
+| `scripts/bootstrap_distro.ps1` | Windows orchestrator (admin PowerShell): downloads Ubuntu 24.04 rootfs, `wsl --import Ubuntu-roboclaw`, ships + runs the in-distro provisioner. Idempotent. |
+| `scripts/provision_distro.sh` | In-distro provisioner: creates the operator user, writes `/etc/wsl.conf` (`[boot] systemd=true`), installs Docker Engine via `get.docker.com`, applies CH343 + v4l udev rules, installs the WSLInterop guard. Marker-file-versioned skip (`/etc/roboclaw/provisioned.v<N>`). |
+| `scripts/deploy.sh` | End-to-end bringup inside `Ubuntu-roboclaw`: provision (skipped after first run via marker) → clone repo → `docker compose build` → `onboard` via plain `docker run` (bypasses compose's hard `devices:` requirement on first run before USB is attached). |
+| `scripts/install-interop-guard.sh` | Systemd oneshot + 30s timer that re-registers `:WSLInterop:M::MZ::/init:FP` whenever cross-distro `wsl.exe` exits wipe it. Hardened with `ProtectSystem=strict`, `CAP_SYS_ADMIN` only. |
+| `scripts/attach_usb_roboclaw.ps1` | USB routing from admin PowerShell: detaches stale sessions, `usbipd bind --force` + `usbipd attach --wsl Ubuntu-roboclaw --auto-attach` for all 7 BUSIDs (4 SO-101 arms + 3 DSJ-2062 cameras). Verifies inside the distro that arms=4 AND cameras=3, exits non-zero on mismatch. |
+| `scripts/setup-udev.sh` | CH343 (`idVendor=0x1a86`) + video4linux udev rules for stable `/dev/serial/by-id/` and `/dev/v4l/by-path/` symlinks. Invoked by the provisioner. |
+
+### Container build (`Dockerfile`, `docker-compose.yml`)
+
+Three-stage Dockerfile: `node:20-slim` (ui-builder) → `node:20-slim` (bridge-builder) → `ghcr.io/astral-sh/uv:python3.12-bookworm-slim` (runtime, editable install). Stage-2 ships `linux-libc-dev` + `build-essential` + ffmpeg runtime libs (`libavcodec59`, `libavformat59`, …) so `evdev` and `torchcodec` build/import cleanly. Uses PyTorch's CPU-only index (`--extra-index-url https://download.pytorch.org/whl/cpu`) to keep the image lean (~180 MB torch vs 4 GB CUDA).
+
+`docker-compose.yml`'s `roboclaw-web` service binds USB devices (`/dev/ttyACM0..3, /dev/video0`) plus permissive cgroup rules for majors 81 (video), 166 (CDC-ACM), 188 (USB-serial), 189 (raw libusb — flagged trusted-host-only). Three load-bearing volumes:
+
+- `/home/hafnium/.roboclaw:/root/.roboclaw` — workspace + config (ext4, fast).
+- `/home/hafnium/.roboclaw-local-share:/root/.local/share` — `oauth_cli_kit` token persistence across `--rm` containers.
+- `/dev/serial:/dev/serial:ro` — udev-populated stable `by-id/` symlinks so arm manifests don't shuffle on replug.
+
+### Deployment docs (`docs/`)
+
+| Doc | Audience |
+|-----|----------|
+| `docs/INSTALLATION.md` | Native `uv` install path (Linux / macOS / WSL2 without hardware passthrough). |
+| `docs/DOCKERINSTALLATION.md` | Minimal stateless Docker path — pure-LLM agent + dashboard, no hardware. |
+| `docs/WSL2_DOCKER_DEPLOYMENT.md` | **Primary technical doc for this fork.** Architecture (§1), bring-up procedure (§3-9), troubleshooting table (§10, ~13 entries), file index (§12), session commit chain (§13), operational lessons (§14). |
+| `docs/SO101_BIMANUAL_DRIVER.md` | Driver-source decision: why this fork vendors the LeRobot fork at `roboclaw/embodied/engine` instead of pinning `lerobot[feetech]` from PyPI. Bimanual `bi_so_*` config aliases verified here. |
+| `docs/FORK_PROGRESS_REPORT.md` | Standalone fork-vs-upstream progress report — commit timeline by theme, validation status with reader-runnable probes, churn signals, three-script reproducibility recipe with hidden prerequisites, open issues, dated milestone snapshots. |
+
+### Jira project of record
+
+The development plan and progress live at `https://hafnium.atlassian.net` (cloudId `acc85cb6-501c-40e0-b26f-9c882f12cc22`) in the **Humanoid** project (key `HUM`), under the **`RoboClaw`** label and parented to Epic **`HUM-1`**. The current 10-card layout (HUM-2 through HUM-10) covers Day-N resume, manifest binding, calibration, bandwidth & jitter validation, teleop, and the first dataset recording. Dependencies are wired via `Blocks` links. See the `roboclaw-jira` skill for the conventions and the `roboclaw-breeder` agent for execution.
+
+### When a fresh Claude session should reach for these
+
+| User says | Reach for |
+|-----------|-----------|
+| "Bring up RoboClaw" / "Resume" / "Why is `/api/health` not responding?" | `roboclaw-deployment` skill (user-level, at `~/.claude/skills/roboclaw-deployment/`) + `roboclaw-breeder` agent §1 state probe + §2.A bring-up |
+| "Create a card for…" / "What's the next ready card?" / "Move HUM-N to Done" | `roboclaw-jira` skill + `roboclaw-breeder` §2.G card-execution routine |
+| "Calibrate the arms" / "Record a dataset" / "Run teleop" | `roboclaw-breeder` §2.D / §2.F / §2.E — operator-mediated, never solo |
+| "Sync from upstream" / "What did upstream change?" | `roboclaw-breeder` §2.I — merge-not-rebase by default |
+| "Update the progress report" / "Document what happened" | `roboclaw-breeder` §2.H — keeps `docs/FORK_PROGRESS_REPORT.md` snapshots + `docs/WSL2_DOCKER_DEPLOYMENT.md` §13/§14 current |
