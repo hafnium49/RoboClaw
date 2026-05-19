@@ -195,15 +195,20 @@ What the script does:
 5. Spawns one hidden `usbipd attach --wsl Ubuntu-roboclaw --busid <b>
    --auto-attach` per BUSID. These processes stay alive in the background so
    devices reattach automatically on replug.
-6. Verifies by listing `/dev/ttyACM*`, `/dev/video*`, and
-   `/dev/serial/by-id/` inside `Ubuntu-roboclaw`.
+6. Verifies inside `Ubuntu-roboclaw` by listing `/dev/ttyACM*`,
+   `/dev/serial/by-id/`, and `/dev/video*`, then asserts the **expected device
+   counts**: `arms = 4` AND `cameras = 3` (1 scene + 2 wrist). Camera count is
+   derived from `/dev/v4l/by-path/*-video-index0` (one entry per physical UVC
+   capture endpoint), with a `udevadm info → ID_PATH` grouping fallback if
+   `by-path/` is empty. Exits non-zero on mismatch so re-runs in CI / scripts
+   can detect a partial attach.
 
 Flags:
 
 | Flag | Purpose |
 |------|---------|
 | `-Distro <name>` | Override target distro (default `Ubuntu-roboclaw`). |
-| `-BusIds <array>` | Override BUSIDs (default `4-3, 4-4, 5-1, 5-3, 5-4`). Re-verify yours with `usbipd list`. |
+| `-BusIds <array>` | Override BUSIDs (default `4-1, 4-2, 4-3, 4-4, 5-1, 5-3, 5-4` = 4 arms + 1 scene cam + 2 wrist cams). Re-verify yours with `usbipd list`. |
 | `-Detach` | Reverse direction — detach all BUSIDs from every distro. Use before handing the hardware back to another project. |
 
 To make auto-attach persist across Windows reboots, register the script as a
@@ -416,6 +421,7 @@ This deployment was brought up incrementally. Each commit below corresponds to a
 | `a9cc9fd` | docs | Three-row decision table at the top of each install guide; `docs/INSTALLATION.md` renamed 5.1/5.2 → 6.1/6.2; `docs/DOCKERINSTALLATION.md` documents submodule requirement + explicit "doesn't cover" list; WSL2 guide §12 expanded + new §13 session commit chain. |
 | `6f4320f` | docs | Fix stale §4 Step 4 description (onboard uses `docker run`, not `docker compose run`); add Path A (USB first → compose) / Path B (no-USB → `docker run` direct) for post-deploy interactive commands. |
 | `0adc679` | compose | Add two volumes to `roboclaw-web`: `/home/hafnium/.roboclaw-local-share:/root/.local/share` for oauth_cli_kit token persistence across `--rm` containers, and `/dev/serial:/dev/serial:ro` so arm manifests can bind to udev's stable `/dev/serial/by-id/usb-1a86_*` symlinks instead of shuffling ttyACMx indices. |
+| _(pending)_ | scripts | `scripts/attach_usb_roboclaw.ps1`: default BUSID list grows from 5 → 7 (added `4-1` and `4-2` for the two new wrist cameras on the followers; the original 4 arms + 1 scene cam remain unchanged). Verification step rewritten to assert `arms=4` AND `cameras=3` and exit non-zero on mismatch; camera count derives from `/dev/v4l/by-path/*-video-index0` with udev `ID_PATH` fallback. |
 
 End-to-end time on a warm cache: ~14 seconds (deploy.sh run 6 on day 2). Cold build: ~10 minutes dominated by apt/npm/uv downloads.
 

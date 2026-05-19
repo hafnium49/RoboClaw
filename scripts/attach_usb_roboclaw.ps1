@@ -79,9 +79,51 @@ Start-Sleep -Seconds 3
 
 Write-Host ""
 Write-Host "=== Verification (inside $Distro) ==="
-wsl -d $Distro -- bash -c "ls -l /dev/ttyACM* /dev/video* 2>/dev/null; echo ''; ls -l /dev/serial/by-id/ 2>/dev/null"
+
+# Single-quoted here-string: PowerShell does NOT interpolate. Bash variables ($arms,
+# $cams, $d) stay literal until bash evaluates them inside the distro.
+$verifyScript = @'
+echo "--- /dev/ttyACM* (arms) ---"
+ls -1 /dev/ttyACM* 2>/dev/null || echo "(none)"
+echo ""
+echo "--- /dev/serial/by-id/ (stable arm symlinks) ---"
+ls -1 /dev/serial/by-id/ 2>/dev/null || echo "(none)"
+echo ""
+echo "--- /dev/video* (raw camera nodes) ---"
+ls -1 /dev/video* 2>/dev/null || echo "(none)"
+echo ""
+
+arms=$(ls /dev/serial/by-id/usb-1a86_USB_Single_Serial_* 2>/dev/null | wc -l)
+
+# Count distinct cameras: prefer /dev/v4l/by-path/ (one *-video-index0 per camera).
+# Fall back to udev ID_PATH grouping if by-path/ is absent.
+cams=$(ls /dev/v4l/by-path/*-video-index0 2>/dev/null | wc -l)
+if [ "$cams" -eq 0 ]; then
+    cams=$(ls /dev/video* 2>/dev/null | while read d; do \
+        udevadm info --query=property --name="$d" 2>/dev/null | \
+        awk -F= '/^ID_PATH=/{print $2; exit}'; \
+    done | sort -u | grep -c . || echo 0)
+fi
+
+echo "=== Device counts ==="
+echo "arms:     $arms  (expect 4)"
+echo "cameras:  $cams  (expect 3: 1 scene + 2 wrist)"
+if [ "$arms" -eq 4 ] && [ "$cams" -eq 3 ]; then
+    echo "[PASS] all devices accounted for"
+    exit 0
+else
+    echo "[FAIL] device count mismatch — check usbipd attach state, physical cables, and bus enumeration"
+    exit 1
+fi
+'@
+
+wsl -d $Distro -- bash -c $verifyScript
+$verifyExit = $LASTEXITCODE
 
 Write-Host ""
+if ($verifyExit -ne 0) {
+    Write-Host "WARNING: verification reported a device count mismatch (exit $verifyExit)." -ForegroundColor Yellow
+}
 Write-Host "Done. Auto-attach processes are running in the background."
 Write-Host "To stop them:  Get-Process usbipd | Stop-Process"
 Write-Host "To detach:     .\attach_usb_roboclaw.ps1 -Detach"

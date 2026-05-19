@@ -228,7 +228,7 @@ The "three-script path" — three scripts wrap most of bring-up, but four manual
 | # | Script | Where run | What it does |
 |---|--------|-----------|--------------|
 | 1 | `scripts/bootstrap_distro.ps1` | Admin PowerShell (Windows) | Download Ubuntu 24.04 rootfs, `wsl --import Ubuntu-roboclaw`, ship + run provisioner inside the new distro. |
-| 2 | `scripts/attach_usb_roboclaw.ps1` | Admin PowerShell (Windows, separate session) | `usbipd bind --force` (first time) + `usbipd attach --wsl Ubuntu-roboclaw` for the 5 BUSIDs. |
+| 2 | `scripts/attach_usb_roboclaw.ps1` | Admin PowerShell (Windows, separate session) | `usbipd bind --force` (first time) + `usbipd attach --wsl Ubuntu-roboclaw` for the 7 BUSIDs (4 arms + 1 scene cam + 2 wrist cams). Default list lives at line 10; override via `-BusIds`. Post-attach verification asserts arms=4 AND cameras=3 and exits non-zero on mismatch. |
 | 3 | `scripts/deploy.sh` | `wsl -d Ubuntu-roboclaw -u root` | Re-run provisioner (marker-skipped after first run), clone repo, build image, scaffold `~/.roboclaw`. |
 
 ### Hidden prerequisites (not wrapped by any script)
@@ -250,7 +250,7 @@ Issues catalogued in [WSL2_DOCKER_DEPLOYMENT.md §10 Troubleshooting](./WSL2_DOC
 
 - **Manifest still empty** — embodied identification ran successfully (4 arms detected by serial), but binding to manifest entries (`so101_leader/follower` × `left/right`) and per-arm calibration are deferred to operator. The interactive setup-identify subprocess shows a camera-side prompt buffering symptom that hasn't been fully diagnosed; current workaround is to skip setup-identify and use `BindArmTool` directly with serials known from the operator's records.
 - **Model ID drift** — `gpt-5.2` is the current ChatGPT-account-allowed model. OpenAI rolls models off this allowlist on a few-month cadence; if `agent -m hi` starts returning a 4xx, check `roboclaw/providers/openai_codex_provider.py` for the current allowlist and re-edit `~/.roboclaw/config.json`.
-- **Second UVC camera (DSJ-2062 #2) untested** — only one camera is currently attached. USB 2.0 isochronous bandwidth ceiling is ~720p/30 MJPEG per camera; a second camera may saturate the bus through usbipd. Pre-validate with `v4l2-ctl --device=/dev/video1 --stream-mmap` before adding to compose `devices:`.
+- **Three-camera bandwidth ceiling under usbipd untested** — week-2 setup adds 2 wrist cams (DSJ-2062 on `4-1`, `4-2`) on top of the existing scene cam. All 3 are the same VID:PID `0c45:64ab` model. USB 2.0 isochronous ceiling is ~720p/30 MJPEG per camera; three simultaneous streams almost certainly saturate the bus through usbipd-over-TCP. Pre-validate per-camera with `v4l2-ctl --device=/dev/v4l/by-path/<path> --stream-mmap` before turning all three on simultaneously during teleop. Expect to drop scene cam to 480p YUYV if all-three-on-30Hz is required.
 - **30 Hz teleop jitter unmeasured** — Embedded review flagged 5–15 ms jitter tails from `usbipd` TCP + Windows scheduler pressure; bimanual at 30 Hz is within budget on paper but unverified. The jitter probe in [WSL2_DOCKER_DEPLOYMENT.md §11](./WSL2_DOCKER_DEPLOYMENT.md) should be run before the first dataset recording session.
 - **`scripts/gen_progress_stats.sh` not yet created** — the autogen markers in §2 are placeholders; the regenerator script is planned but not committed.
 
@@ -299,4 +299,10 @@ Issues catalogued in [WSL2_DOCKER_DEPLOYMENT.md §10 Troubleshooting](./WSL2_DOC
 
 Append dated subsections at milestones (post-calibration, post-teleop, post-recording). The "current state" §1 stays at the top; older snapshots accumulate here.
 
-_(No prior snapshots — first revision of this report.)_
+### 2026-05-18 — wrist cameras + upstream merge
+
+- **Upstream sync**: merged `upstream/main` (94 commits) into `main` at `ad93322`. `pyproject.toml` auto-resolved: our `lerobot[feetech,dynamixel]` (drop `[pi]`) and upstream's `editable = true` for the local-path source landed in the same file via non-overlapping line edits. Pushed to `origin/main` from outside the sandbox (the Claude shell's squid proxy at `localhost:3128` 502'd on every `CONNECT github.com:443` during the merge turn).
+- **Hardware additions**: 2 wrist cameras mounted on the followers (`DSJ-2062-309`, identical model to the existing scene cam, VID:PID `0c45:64ab`). Three cameras total now. Wrist cams enumerated as USB BUSIDs `4-1` and `4-2`; the existing 4 arms (`4-3, 4-4, 5-1, 5-3`) and scene cam (`5-4`) are unchanged.
+- **Scripts**: `scripts/attach_usb_roboclaw.ps1` default BUSID list grew from 5 → 7. Verification step rewritten to count arms (expect 4) AND distinct cameras (expect 3, via `/dev/v4l/by-path/*-video-index0` with `udevadm ID_PATH` fallback) and exit non-zero on mismatch. No changes to `bootstrap_distro.ps1` / `provision_distro.sh` / `deploy.sh` / `install-interop-guard.sh`.
+- **Manifest binding (still deferred)**: 3 cameras need physical-port → side-label disambiguation. udev's `ID_PATH` is the stable handle since serial numbers aren't unique across identical-model UVC cameras. Binding work still requires operator-in-the-loop (which cable is left-wrist vs right-wrist vs scene).
+- **Open upstream pickup**: `roboclaw/embodied/calibration/so101/auto.py` + `prober.py` arrived in the merge — these may automate the per-arm calibration walk that's been blocked since week 1. Not yet read or evaluated.
