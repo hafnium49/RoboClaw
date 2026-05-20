@@ -95,47 +95,49 @@ Start-Sleep -Seconds 8
 Write-Host ""
 Write-Host "=== Verification (inside $Distro) ==="
 
-# Single-quoted here-string: PowerShell does NOT interpolate. Bash variables
-# stay literal until bash evaluates them. Defaults via ${var:-0} guard against
-# empty values from failed pipes — so the integer test never sees "".
-$verifyScript = @'
-echo "--- /dev/ttyACM* (arms) ---"
-ls -1 /dev/ttyACM* 2>/dev/null || echo "(none)"
-echo ""
-echo "--- /dev/serial/by-id/ (stable arm symlinks) ---"
-ls -1 /dev/serial/by-id/ 2>/dev/null || echo "(none)"
-echo ""
-echo "--- /dev/video* (raw camera nodes) ---"
-ls -1 /dev/video* 2>/dev/null || echo "(none)"
-echo ""
+# Verification is PowerShell-side, NOT a multi-line bash heredoc through
+# `bash -c $script`. The heredoc approach was brittle: CRLF preserved through
+# PowerShell→wsl→bash made each line's trailing `\r` part of variable values,
+# so `arms=${arms:-0}` ended up as `"0\r"`, the `\r` carriage-returned the
+# subsequent echo, and the integer test `[ "$arms" -eq 4 ]` choked on `"0\r"`
+# with "integer expression expected". One-liner `wsl -- bash -lc 'expr'` calls
+# return clean stdout; PowerShell's .Trim() strips any stray whitespace.
+$ttyAcm  = (wsl -d $Distro -- bash -lc 'ls -1 /dev/ttyACM* 2>/dev/null' | Out-String).Trim()
+$byId    = (wsl -d $Distro -- bash -lc 'ls -1 /dev/serial/by-id/ 2>/dev/null' | Out-String).Trim()
+$videos  = (wsl -d $Distro -- bash -lc 'ls -1 /dev/video* 2>/dev/null' | Out-String).Trim()
 
-arms=$(ls -1 /dev/serial/by-id/usb-1a86_USB_Single_Serial_* 2>/dev/null | wc -l)
-arms=${arms:-0}
+Write-Host "--- /dev/ttyACM* (arms) ---"
+Write-Host ($ttyAcm  ? $ttyAcm  : "(none)")
+Write-Host ""
+Write-Host "--- /dev/serial/by-id/ (stable arm symlinks) ---"
+Write-Host ($byId    ? $byId    : "(none)")
+Write-Host ""
+Write-Host "--- /dev/video* (raw camera nodes) ---"
+Write-Host ($videos  ? $videos  : "(none)")
+Write-Host ""
 
-# Count distinct cameras: prefer /dev/v4l/by-path/ (one *-video-index0 per camera).
-# Fall back to udev ID_PATH grouping if by-path/ is absent. Single-line forms
-# avoid backslash continuations, which CRLF transmission can break.
-cams=$(ls -1 /dev/v4l/by-path/*-video-index0 2>/dev/null | wc -l)
-cams=${cams:-0}
-if [ "$cams" -eq 0 ]; then
-    cams=$(for d in /dev/video*; do [ -e "$d" ] && udevadm info --query=property --name="$d" 2>/dev/null | awk -F= '/^ID_PATH=/{print $2; exit}'; done | sort -u | grep -c . 2>/dev/null)
-    cams=${cams:-0}
-fi
+# Count arms by CH343 by-id pattern (one symlink per arm, stable across replug).
+$armCount = [int]((wsl -d $Distro -- bash -lc 'ls -1 /dev/serial/by-id/usb-1a86_USB_Single_Serial_*-if00 2>/dev/null | wc -l').Trim())
 
-echo "=== Device counts ==="
-echo "arms:     $arms  (expect 4)"
-echo "cameras:  $cams  (expect 3: 1 scene + 2 wrist)"
-if [ "$arms" -eq 4 ] && [ "$cams" -eq 3 ]; then
-    echo "[PASS] all devices accounted for"
-    exit 0
-else
-    echo "[FAIL] device count mismatch — check usbipd attach state, physical cables, and bus enumeration"
-    exit 1
-fi
-'@
+# Count distinct cameras. Primary: one /dev/v4l/by-path/*-video-index0 entry per
+# camera. Fallback: distinct udev ID_PATH values across /dev/video*. Both run as
+# single-line bash commands; counting and comparison happen in PowerShell so no
+# CRLF can corrupt the integer values.
+$camCount = [int]((wsl -d $Distro -- bash -lc 'ls -1 /dev/v4l/by-path/*-video-index0 2>/dev/null | wc -l').Trim())
+if ($camCount -eq 0) {
+    $camCount = [int]((wsl -d $Distro -- bash -lc 'for d in /dev/video*; do [ -e "$d" ] && udevadm info --query=property --name="$d" 2>/dev/null | awk -F= "/^ID_PATH=/{print \$2; exit}"; done | sort -u | grep -c .' 2>$null).Trim())
+}
 
-wsl -d $Distro -- bash -c $verifyScript
-$verifyExit = $LASTEXITCODE
+Write-Host "=== Device counts ==="
+Write-Host "arms:     $armCount  (expect 4)"
+Write-Host "cameras:  $camCount  (expect 3: 1 scene + 2 wrist)"
+if ($armCount -eq 4 -and $camCount -eq 3) {
+    Write-Host "[PASS] all devices accounted for" -ForegroundColor Green
+    $verifyExit = 0
+} else {
+    Write-Host "[FAIL] device count mismatch — check usbipd attach state, physical cables, and bus enumeration" -ForegroundColor Red
+    $verifyExit = 1
+}
 
 Write-Host ""
 if ($verifyExit -ne 0) {
@@ -144,3 +146,7 @@ if ($verifyExit -ne 0) {
 Write-Host "Done. Auto-attach processes are running in the background."
 Write-Host "To stop them:  Get-Process usbipd | Stop-Process"
 Write-Host "To detach:     .\attach_usb_roboclaw.ps1 -Detach"
+
+# Propagate verification result via $LASTEXITCODE so callers (resume_roboclaw.ps1)
+# can branch on it. 0 = [PASS], 1 = [FAIL].
+exit $verifyExit
