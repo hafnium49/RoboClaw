@@ -119,13 +119,16 @@ Write-Host ""
 # Count arms by CH343 by-id pattern (one symlink per arm, stable across replug).
 $armCount = [int]((wsl -d $Distro -- bash -lc 'ls -1 /dev/serial/by-id/usb-1a86_USB_Single_Serial_*-if00 2>/dev/null | wc -l').Trim())
 
-# Count distinct cameras. Primary: one /dev/v4l/by-path/*-video-index0 entry per
-# camera. Fallback: distinct udev ID_PATH values across /dev/video*. Both run as
-# single-line bash commands; counting and comparison happen in PowerShell so no
-# CRLF can corrupt the integer values.
-$camCount = [int]((wsl -d $Distro -- bash -lc 'ls -1 /dev/v4l/by-path/*-video-index0 2>/dev/null | wc -l').Trim())
+# Count distinct cameras by VID:PID. DSJ-2062 is 0c45:64ab. Each physical camera
+# exposes 2 v4l2 nodes (primary video + metadata), each with its own ID_PATH and
+# its own /dev/v4l/by-path/*-video-index0 entry — so counting symlinks or video
+# nodes inflates the count 2x. lsusb groups by USB device, which IS the right
+# unit of "physical camera". One line per camera, regardless of v4l-node fanout.
+# Falls back to sysfs walk if lsusb is absent (some minimal distros don't ship
+# usbutils, though our provisioner installs it).
+$camCount = [int]((wsl -d $Distro -- bash -lc 'lsusb -d 0c45:64ab 2>/dev/null | wc -l').Trim())
 if ($camCount -eq 0) {
-    $camCount = [int]((wsl -d $Distro -- bash -lc 'for d in /dev/video*; do [ -e "$d" ] && udevadm info --query=property --name="$d" 2>/dev/null | awk -F= "/^ID_PATH=/{print \$2; exit}"; done | sort -u | grep -c .' 2>$null).Trim())
+    $camCount = [int]((wsl -d $Distro -- bash -lc 'for d in /sys/bus/usb/devices/*; do v=$(cat "$d/idVendor" 2>/dev/null); p=$(cat "$d/idProduct" 2>/dev/null); [ "$v" = "0c45" ] && [ "$p" = "64ab" ] && echo "$d"; done | wc -l' 2>$null).Trim())
 }
 
 Write-Host "=== Device counts ==="
