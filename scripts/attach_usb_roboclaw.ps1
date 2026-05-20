@@ -51,6 +51,17 @@ Write-Host "=== Attaching USB devices to $Distro ==="
 Write-Host "  Target BUSIDs: $($BusIds -join ', ')"
 Write-Host ""
 
+# Wake the distro and keep it alive for the duration of bind/attach.
+# `usbipd attach --auto-attach` watchers exit immediately with "selected WSL
+# distribution is not running" if the distro is Stopped at spawn time, so we
+# must guarantee a live distro BEFORE the attach loop. A backgrounded
+# `sleep 7200` in the distro keeps it up for 2 hours (well past anything this
+# script does). Idempotent — running multiple times just spawns extra sleeps.
+Write-Host "  Waking $Distro to keep its kernel alive during attach..."
+Start-Process -WindowStyle Hidden -FilePath "wsl" `
+    -ArgumentList @("-d", $Distro, "--", "sh", "-c", "sleep 7200") | Out-Null
+Start-Sleep -Seconds 2
+
 # Clear any stale sessions (e.g. left over from a usbipd service restart after Windows Update).
 # Then detach each target BUSID so we never collide with a prior attachment (e.g. to Ubuntu).
 Write-Host "  Clearing stale usbipd sessions..."
@@ -75,13 +86,18 @@ foreach ($b in $BusIds) {
     Write-Host " spawned"
 }
 
-Start-Sleep -Seconds 3
+# Cold-distro USB enumeration takes longer than 3s. Give auto-attach watchers
+# time to land devices and udev time to populate /dev/{serial,v4l}/by-*. The
+# distro was woken above, so this is just the propagation budget.
+Write-Host "  Waiting for udev to populate device symlinks..."
+Start-Sleep -Seconds 8
 
 Write-Host ""
 Write-Host "=== Verification (inside $Distro) ==="
 
-# Single-quoted here-string: PowerShell does NOT interpolate. Bash variables ($arms,
-# $cams, $d) stay literal until bash evaluates them inside the distro.
+# Single-quoted here-string: PowerShell does NOT interpolate. Bash variables
+# stay literal until bash evaluates them. Defaults via ${var:-0} guard against
+# empty values from failed pipes — so the integer test never sees "".
 $verifyScript = @'
 echo "--- /dev/ttyACM* (arms) ---"
 ls -1 /dev/ttyACM* 2>/dev/null || echo "(none)"
@@ -93,16 +109,17 @@ echo "--- /dev/video* (raw camera nodes) ---"
 ls -1 /dev/video* 2>/dev/null || echo "(none)"
 echo ""
 
-arms=$(ls /dev/serial/by-id/usb-1a86_USB_Single_Serial_* 2>/dev/null | wc -l)
+arms=$(ls -1 /dev/serial/by-id/usb-1a86_USB_Single_Serial_* 2>/dev/null | wc -l)
+arms=${arms:-0}
 
 # Count distinct cameras: prefer /dev/v4l/by-path/ (one *-video-index0 per camera).
-# Fall back to udev ID_PATH grouping if by-path/ is absent.
-cams=$(ls /dev/v4l/by-path/*-video-index0 2>/dev/null | wc -l)
+# Fall back to udev ID_PATH grouping if by-path/ is absent. Single-line forms
+# avoid backslash continuations, which CRLF transmission can break.
+cams=$(ls -1 /dev/v4l/by-path/*-video-index0 2>/dev/null | wc -l)
+cams=${cams:-0}
 if [ "$cams" -eq 0 ]; then
-    cams=$(ls /dev/video* 2>/dev/null | while read d; do \
-        udevadm info --query=property --name="$d" 2>/dev/null | \
-        awk -F= '/^ID_PATH=/{print $2; exit}'; \
-    done | sort -u | grep -c . || echo 0)
+    cams=$(for d in /dev/video*; do [ -e "$d" ] && udevadm info --query=property --name="$d" 2>/dev/null | awk -F= '/^ID_PATH=/{print $2; exit}'; done | sort -u | grep -c . 2>/dev/null)
+    cams=${cams:-0}
 fi
 
 echo "=== Device counts ==="

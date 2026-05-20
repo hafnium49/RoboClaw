@@ -66,6 +66,53 @@ That single line tells you which life stage you're advancing.
 
 Drive §2.B from `roboclaw-deployment` skill. Acceptance: `/api/health` returns ok AND USB devices visible inside the container. If the user is at cold-state, refuse to attempt distro creation from a Linux shell — hand off to admin PowerShell.
 
+**Cold-distro USB attach gotcha.** When the operator runs `scripts/attach_usb_roboclaw.ps1` from a cold state (no `Ubuntu-roboclaw` distro running yet, no prior wsl session keeping it warm), the script's verification block may report `[FAIL] device count mismatch` even though every per-BUSID `bind` + `attach` step reported `OK / spawned`. The smoking-gun symptoms in the operator's terminal:
+
+```
+[4-1] binding (persistent)... OK
+[4-1] attaching to Ubuntu-roboclaw (auto-reattach on replug)... spawned
+... (×7 BUSIDs, all OK/spawned)
+
+=== Verification (inside Ubuntu-roboclaw) ===
+--- /dev/ttyACM* (arms) --- (none)
+--- /dev/serial/by-id/    --- (none)
+--- /dev/video*           --- (none)
+arms:     0  (expect 4)   cameras:  0  (expect 3)
+[FAIL] device count mismatch
+```
+
+**This is not an attach failure.** The script's post-2025-05 version wakes the distro before spawning attaches, but older operator machines (or older committed versions of the script) may not. Diagnostic decision tree:
+
+1. **First, re-check NOW** (the verification may have run before udev propagated):
+
+   ```powershell
+   wsl -d Ubuntu-roboclaw -- ls /dev/ttyACM* /dev/serial/by-id/ /dev/video* 2>/dev/null
+   ```
+
+   If devices visible: timing miss only. The bind+attach actually worked. Proceed to `docker compose up -d roboclaw-web`.
+
+2. **If still empty**, check the auto-attach watchers:
+
+   ```powershell
+   Get-Process usbipd | Format-Table Id, StartTime
+   ```
+
+   - **7 processes alive**: watchers waiting for the distro. Wake it persistently:
+     ```powershell
+     Start-Process -WindowStyle Hidden wsl -ArgumentList "-d","Ubuntu-roboclaw","--","sh","-c","sleep 7200"
+     Start-Sleep 5
+     wsl -d Ubuntu-roboclaw -- ls /dev/ttyACM*
+     ```
+   - **Fewer than 7**: watchers died ("distro not running"). Clean up + re-run:
+     ```powershell
+     Get-Process usbipd | Stop-Process -Force
+     Start-Process -WindowStyle Hidden wsl -ArgumentList "-d","Ubuntu-roboclaw","--","sh","-c","sleep 7200"
+     Start-Sleep 5
+     & '\\wsl.localhost\Ubuntu\home\hafnium\RoboClaw\scripts\attach_usb_roboclaw.ps1'
+     ```
+
+**Recovery is never `usbipd unbind` + re-bind unless the BUSID is gone from `usbipd list` entirely.** Bind is GUID-persistent across reboots and Windows-side state survives even when the distro is down. Re-binding only adds noise.
+
 ### §2.B Manifest curation (arms)
 
 For each `/dev/serial/by-id/usb-1a86_USB_Single_Serial_<SN>-if00` not yet bound:
